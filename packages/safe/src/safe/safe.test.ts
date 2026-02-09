@@ -2333,13 +2333,13 @@ describe('safe', () => {
         vi.useRealTimers()
       })
 
-      it('passes AbortSignal as last argument to wrapped function', async () => {
+      it('does not inject AbortSignal into wrapped function args', async () => {
         vi.useFakeTimers()
 
         let receivedArgs: unknown[] = []
 
-        const fn = vi.fn().mockImplementation((id: number, name: string, signal?: AbortSignal) => {
-          receivedArgs = [id, name, signal]
+        const fn = vi.fn().mockImplementation((id: number, name: string) => {
+          receivedArgs = [id, name]
           return new Promise((resolve) => setTimeout(() => resolve('done'), 50))
         })
 
@@ -2349,9 +2349,8 @@ describe('safe', () => {
         await vi.advanceTimersByTimeAsync(50)
         await promise
 
-        expect(receivedArgs[0]).toBe(42)
-        expect(receivedArgs[1]).toBe('test')
-        expect(receivedArgs[2]).toBeInstanceOf(AbortSignal)
+        expect(receivedArgs).toEqual([42, 'test'])
+        expect(fn).toHaveBeenCalledWith(42, 'test')
 
         vi.useRealTimers()
       })

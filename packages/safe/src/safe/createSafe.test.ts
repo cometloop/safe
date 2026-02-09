@@ -1435,6 +1435,94 @@ describe('createSafe', () => {
       expect(result[1]).toBe('Error: original')
     })
 
+    it('per-call onSuccess still runs when default onSuccess throws', () => {
+      const perCallOnSuccess = vi.fn()
+
+      const appSafe = createSafe({
+        parseError: (e) => String(e),
+        onSuccess: () => {
+          throw new Error('default onSuccess threw')
+        },
+      })
+
+      const result = appSafe.sync(() => 42, { onSuccess: perCallOnSuccess })
+
+      expect(perCallOnSuccess).toHaveBeenCalledWith(42, [])
+      expect(result).toEqual([42, null])
+    })
+
+    it('per-call onError still runs when default onError throws', () => {
+      const perCallOnError = vi.fn()
+
+      const appSafe = createSafe({
+        parseError: (e) => String(e),
+        onError: () => {
+          throw new Error('default onError threw')
+        },
+      })
+
+      const result = appSafe.sync(
+        () => { throw new Error('fail') },
+        { onError: perCallOnError },
+      )
+
+      expect(perCallOnError).toHaveBeenCalledWith('Error: fail', [])
+      expect(result[0]).toBeNull()
+      expect(result[1]).toBe('Error: fail')
+    })
+
+    it('per-call onSettled still runs when default onSettled throws', () => {
+      const perCallOnSettled = vi.fn()
+
+      const appSafe = createSafe({
+        parseError: (e) => String(e),
+        onSettled: () => {
+          throw new Error('default onSettled threw')
+        },
+      })
+
+      const result = appSafe.sync(() => 42, { onSettled: perCallOnSettled })
+
+      expect(perCallOnSettled).toHaveBeenCalledWith(42, null, [])
+      expect(result).toEqual([42, null])
+    })
+
+    it('per-call onRetry still runs when default onRetry throws (async)', async () => {
+      const fn = vi.fn().mockRejectedValue(new Error('fail'))
+      const perCallOnRetry = vi.fn()
+
+      const appSafe = createSafe({
+        parseError: (e) => String(e),
+        retry: { times: 1 },
+        onRetry: () => {
+          throw new Error('default onRetry threw')
+        },
+      })
+
+      await appSafe.async(fn, { onRetry: perCallOnRetry })
+
+      expect(perCallOnRetry).toHaveBeenCalledWith('Error: fail', 1, [])
+    })
+
+    it('per-call async onSuccess still runs when default onSuccess throws', async () => {
+      const perCallOnSuccess = vi.fn()
+
+      const appSafe = createSafe({
+        parseError: (e) => String(e),
+        onSuccess: () => {
+          throw new Error('default onSuccess threw')
+        },
+      })
+
+      const result = await appSafe.async(
+        () => Promise.resolve('done'),
+        { onSuccess: perCallOnSuccess },
+      )
+
+      expect(perCallOnSuccess).toHaveBeenCalledWith('done', [])
+      expect(result).toEqual(['done', null])
+    })
+
     it('handles empty config with only parseError', () => {
       const appSafe = createSafe({
         parseError: (e) => e,

@@ -71,7 +71,16 @@ export type SafeAsyncHooks<T, E, TContext extends unknown[] = [], TOut = T> = Sa
  * @typeParam TResult - The return type of parseResult (inferred from parseResult)
  */
 export type CreateSafeConfig<E, TResult = never> = {
-  /** Error mapping function applied to all caught errors */
+  /**
+   * Error mapping function applied to all caught errors.
+   *
+   * **Important:** Unlike hooks (`onError`, `onSuccess`, etc.), `parseError` is
+   * **not** wrapped in a try/catch. If this function throws, the exception will
+   * propagate uncaught past the safe boundary. This is intentional — `parseError`
+   * is part of the error-handling contract (its return value determines the `E` in
+   * `SafeResult<T, E>`), so there is no meaningful way to represent a failure
+   * inside `parseError` as a `SafeResult`. Ensure this function does not throw.
+   */
   parseError: (e: unknown) => E
   /** Optional response transform applied to all successful results. Per-call parseResult overrides this. */
   parseResult?: (response: unknown) => TResult
@@ -94,9 +103,6 @@ export type CreateSafeConfig<E, TResult = never> = {
  * Methods do not accept parseError parameter (already configured)
  * @typeParam E - The error type used by all methods
  * @typeParam TResult - The factory parseResult return type (never = no factory parseResult)
- *
- * Note: When abortAfter is configured, async functions receive an AbortSignal as an
- * additional argument. The function can optionally accept this signal to handle cancellation.
  */
 export type SafeInstance<E, TResult = never> = {
   sync: <T, TOut = [TResult] extends [never] ? T : TResult>(

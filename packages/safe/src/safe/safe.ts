@@ -1,16 +1,20 @@
 import type { SafeResult, SafeHooks, SafeAsyncHooks } from './types'
 import { TimeoutError, ok, err } from './types'
 
-// Valid keys for SafeHooks and SafeAsyncHooks
-const HOOK_KEYS: ReadonlySet<string> = new Set([
-  'parseResult',
-  'onSuccess',
-  'onError',
-  'onSettled',
-  'onRetry',
-  'retry',
-  'abortAfter',
-])
+// Valid keys for SafeHooks and SafeAsyncHooks.
+// Using Record<keyof ..., true> ensures compile-time errors if a hook key is
+// added to SafeAsyncHooks but not listed here (missing key) or if a stale key
+// remains after removal (extra key).
+const HOOK_KEY_MAP: Record<keyof SafeAsyncHooks<any, any, any>, true> = {
+  parseResult: true,
+  onSuccess: true,
+  onError: true,
+  onSettled: true,
+  onRetry: true,
+  retry: true,
+  abortAfter: true,
+}
+const HOOK_KEYS: ReadonlySet<string> = new Set(Object.keys(HOOK_KEY_MAP))
 
 // Type guard to distinguish hooks object from parseError function
 const isHooks = <T, E, TContext extends unknown[]>(
@@ -63,6 +67,8 @@ const withTimeout = <T>(
  *
  * @param fn - The synchronous function to execute.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
+ *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
+ *   the exception propagates uncaught past the safe boundary. Ensure it does not throw.
  * @param hooks - Optional hooks for side effects (`parseResult`, `onSuccess`, `onError`, `onSettled`).
  * @returns A `SafeResult<T, E>` tuple: `[value, null]` on success or `[null, error]` on failure.
  *
@@ -132,6 +138,8 @@ function safeSync<T, E = Error, TOut = T>(
  *
  * @param fn - The async function to execute. Receives an optional `AbortSignal` when `abortAfter` is configured.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
+ *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
+ *   the exception propagates uncaught past the safe boundary. Ensure it does not throw.
  * @param hooks - Optional hooks including `retry`, `abortAfter`, `onRetry`, `parseResult`, `onSuccess`, `onError`, `onSettled`.
  * @returns A `Promise<SafeResult<T, E>>` tuple: `[value, null]` on success or `[null, error]` on failure.
  *
@@ -227,6 +235,8 @@ async function safeAsync<T, E = Error, TOut = T>(
  *
  * @param fn - The synchronous function to wrap.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
+ *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
+ *   the exception propagates uncaught past the safe boundary. Ensure it does not throw.
  * @param hooks - Optional hooks for side effects (`parseResult`, `onSuccess`, `onError`, `onSettled`). Hooks receive the original call arguments as context.
  * @returns A wrapped function `(...args) => SafeResult<T, E>`.
  *
@@ -296,11 +306,12 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
  *
  * Returns a new function with the same parameter signature that catches
  * errors and returns `[null, error]` instead of throwing. Supports retry
- * and timeout via hooks. When `abortAfter` is configured, an `AbortSignal`
- * is passed as an additional argument to the wrapped function.
+ * and timeout via hooks.
  *
  * @param fn - The async function to wrap.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
+ *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
+ *   the exception propagates uncaught past the safe boundary. Ensure it does not throw.
  * @param hooks - Optional hooks including `retry`, `abortAfter`, `onRetry`, `parseResult`, `onSuccess`, `onError`, `onSettled`. Hooks receive the original call arguments as context.
  * @returns A wrapped function `(...args) => Promise<SafeResult<T, E>>`.
  *
@@ -360,17 +371,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
       const controller = abortAfter !== undefined ? new AbortController() : undefined
 
       try {
-        // Call function with args and optional signal appended
-        // The function can accept signal as an extra argument if it wants to use it
-        let promise: Promise<T>
-        if (controller) {
-          // Cast needed because we're dynamically adding an argument
-          // The function may or may not use the signal, but it will be passed
-          const argsWithSignal = [...args, controller.signal] as unknown as TArgs
-          promise = fn(...argsWithSignal)
-        } else {
-          promise = fn(...args)
-        }
+        let promise = fn(...args)
 
         // Wrap with timeout if configured
         if (abortAfter !== undefined && controller) {
@@ -498,4 +499,4 @@ export const safe = {
 } as const
 
 // Export individual functions for use by createSafe
-export { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled }
+export { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled, callHook }

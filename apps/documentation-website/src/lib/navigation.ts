@@ -13,6 +13,8 @@ export const navigation = [
       { title: 'safe.async', href: '/docs/safe-async' },
       { title: 'safe.wrap', href: '/docs/safe-wrap' },
       { title: 'safe.wrapAsync', href: '/docs/safe-wrap-async' },
+      { title: 'safe.all', href: '/docs/safe-all' },
+      { title: 'safe.allSettled', href: '/docs/safe-all-settled' },
       { title: 'createSafe', href: '/docs/create-safe' },
     ],
   },

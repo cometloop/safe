@@ -12,6 +12,8 @@ A TypeScript utility library providing type-safe error handling with the Result 
   - <a href="#safeasync">safe.async</a>
   - <a href="#safewrap">safe.wrap</a>
   - <a href="#safewrapasync">safe.wrapAsync</a>
+  - <a href="#safeall">safe.all</a>
+  - <a href="#safeallsettled">safe.allSettled</a>
   - <a href="#createsafe">createSafe (Factory)</a>
 - <a href="#retry-support">Retry Support</a>
   - <a href="#retry-configuration">Retry Configuration</a>
@@ -93,16 +95,16 @@ src/
 └── safe/
     ├── index.ts          # Barrel exports
     ├── types.ts          # Type definitions (SafeResult, SafeHooks, SafeAsyncHooks, RetryConfig, TimeoutError, etc.)
-    ├── safe.ts           # Core functions (sync, async, wrap, wrapAsync) with retry and timeout support
+    ├── safe.ts           # Core functions (sync, async, wrap, wrapAsync, all, allSettled) with retry and timeout support
     ├── createSafe.ts     # Factory function for pre-configured instances
-    ├── safe.test.ts      # Tests for core functions (145 tests)
-    └── createSafe.test.ts # Tests for factory function (92 tests)
+    ├── safe.test.ts      # Tests for core functions (265 tests)
+    └── createSafe.test.ts # Tests for factory function (145 tests)
 ```
 
 | File                                    | Description                                                                                                                      |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| [types.ts](src/safe/types.ts)           | Type definitions: `SafeResult`, `SafeHooks`, `SafeAsyncHooks`, `RetryConfig`, `TimeoutError`, `CreateSafeConfig`, `SafeInstance` |
-| [safe.ts](src/safe/safe.ts)             | Core safe utilities: `sync`, `async`, `wrap`, `wrapAsync` with retry and timeout support                                         |
+| [types.ts](src/safe/types.ts)           | Type definitions: `SafeResult`, `SafeHooks`, `SafeAsyncHooks`, `RetryConfig`, `TimeoutError`, `CreateSafeConfig`, `SafeInstance`  |
+| [safe.ts](src/safe/safe.ts)             | Core safe utilities: `sync`, `async`, `wrap`, `wrapAsync`, `all`, `allSettled` with retry and timeout support                     |
 | [createSafe.ts](src/safe/createSafe.ts) | Factory function for creating pre-configured safe instances                                                                      |
 | [index.ts](src/safe/index.ts)           | Barrel file that re-exports everything for backward compatibility                                                                |
 
@@ -449,6 +451,130 @@ const safeFetchWithRetry = safe.wrapAsync(fetchUser, {
 })
 
 const [user, error] = await safeFetchWithRetry(42)
+```
+
+---
+
+<h3 id="safeall">safe.all</h3>
+
+Runs multiple safe-wrapped async operations in parallel. Returns all unwrapped values as a named object on success, or the first error on failure.
+
+**Signature:**
+
+```typescript
+safe.all<T extends Record<string, Promise<SafeResult<any, any>>>>(
+  promises: T
+): Promise<SafeResult<
+  { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never },
+  T[keyof T] extends Promise<SafeResult<any, infer E>> ? E : never
+>>
+```
+
+**Examples:**
+
+```typescript
+// 1. Basic — all succeed
+const [data, error] = await safe.all({
+  user: safe.async(() => fetchUser(userId)),
+  posts: safe.async(() => fetchPosts(userId)),
+})
+
+if (error) {
+  console.error('Something failed:', error.message)
+  return
+}
+
+console.log(data.user)  // User
+console.log(data.posts) // Post[]
+
+// 2. First error is returned
+const [data, error] = await safe.all({
+  user: safe.async(() => fetchUser(userId)),
+  posts: safe.async(() => Promise.reject(new Error('posts failed'))),
+})
+
+if (error) {
+  console.error(error.message) // "posts failed"
+}
+
+// 3. With per-operation error mapping
+const [data, error] = await safe.all({
+  config: safe.async(() => loadConfig()),
+  user: safe.async(
+    () => fetchUser(userId),
+    (e) => ({ code: 'USER_ERROR', message: String(e) })
+  ),
+})
+
+// 4. With createSafe instance
+const appSafe = createSafe({ parseError: (e) => toAppError(e) })
+
+const [data, error] = await appSafe.all({
+  user: appSafe.async(() => fetchUser(userId)),
+  posts: appSafe.async(() => fetchPosts(userId)),
+})
+```
+
+---
+
+<h3 id="safeallsettled">safe.allSettled</h3>
+
+Runs multiple safe-wrapped async operations in parallel. Always returns all individual results as named `SafeResult` entries — never fails at the group level.
+
+**Signature:**
+
+```typescript
+safe.allSettled<T extends Record<string, Promise<SafeResult<any, any>>>>(
+  promises: T
+): Promise<{ [K in keyof T]: Awaited<T[K]> }>
+```
+
+**Examples:**
+
+```typescript
+// 1. Basic — inspect each result independently
+const results = await safe.allSettled({
+  user: safe.async(() => fetchUser(userId)),
+  posts: safe.async(() => fetchPosts(userId)),
+})
+
+if (results.user.ok) {
+  console.log(results.user.value) // User
+}
+
+if (!results.posts.ok) {
+  console.error(results.posts.error) // Error
+}
+
+// 2. Mixed success and failure
+const results = await safe.allSettled({
+  config: safe.async(() => loadConfig()),
+  user: safe.async(() => fetchUser(userId)),
+  analytics: safe.async(() => trackEvent('page_view')),
+})
+
+// Each result is independent — failures don't affect other results
+if (!results.analytics.ok) {
+  // analytics failed, but config and user may have succeeded
+  console.warn('Analytics failed:', results.analytics.error)
+}
+
+// 3. With destructured tuple access
+const results = await safe.allSettled({
+  a: safe.async(() => Promise.resolve(42)),
+  b: safe.async(() => Promise.reject(new Error('fail'))),
+})
+
+const [aValue, aError] = results.a // [42, null]
+const [bValue, bError] = results.b // [null, Error]
+
+// 4. With createSafe instance
+const appSafe = createSafe({ parseError: (e) => toAppError(e) })
+
+const results = await appSafe.allSettled({
+  user: appSafe.async(() => fetchUser(userId)),
+  posts: appSafe.async(() => fetchPosts(userId)),
+})
 ```
 
 ---
@@ -1261,6 +1387,15 @@ type SafeInstance<E, TResult = never> = {
     fn: (...args: TArgs) => Promise<T>,
     hooks?: SafeAsyncHooks<T, E, TArgs, TOut>
   ) => (...args: TArgs) => Promise<SafeResult<TOut, E>>
+  all: <T extends Record<string, Promise<SafeResult<any, any>>>>(
+    promises: T
+  ) => Promise<SafeResult<
+    { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never },
+    T[keyof T] extends Promise<SafeResult<any, infer EE>> ? EE : never
+  >>
+  allSettled: <T extends Record<string, Promise<SafeResult<any, any>>>>(
+    promises: T
+  ) => Promise<{ [K in keyof T]: Awaited<T[K]> }>
 }
 ```
 
@@ -2385,10 +2520,10 @@ async function processOrder(orderId: string) {
 | File                                                       | Description                                                                                                                       |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | [src/safe/types.ts](src/safe/types.ts)                     | Type definitions (`SafeResult`, `SafeHooks`, `SafeAsyncHooks`, `RetryConfig`, `TimeoutError`, `CreateSafeConfig`, `SafeInstance`) |
-| [src/safe/safe.ts](src/safe/safe.ts)                       | Core functions (`sync`, `async`, `wrap`, `wrapAsync`) with retry and timeout support                                              |
+| [src/safe/safe.ts](src/safe/safe.ts)                       | Core functions (`sync`, `async`, `wrap`, `wrapAsync`, `all`, `allSettled`) with retry and timeout support                         |
 | [src/safe/createSafe.ts](src/safe/createSafe.ts)           | Factory function for pre-configured instances                                                                                     |
 | [src/safe/index.ts](src/safe/index.ts)                     | Barrel exports                                                                                                                    |
-| [src/safe/safe.test.ts](src/safe/safe.test.ts)             | Tests for core functions (145 tests)                                                                                              |
-| [src/safe/createSafe.test.ts](src/safe/createSafe.test.ts) | Tests for factory function (92 tests)                                                                                             |
+| [src/safe/safe.test.ts](src/safe/safe.test.ts)             | Tests for core functions (265 tests)                                                                                              |
+| [src/safe/createSafe.test.ts](src/safe/createSafe.test.ts) | Tests for factory function (145 tests)                                                                                            |
 
-**Total: 237 tests**
+**Total: 410 tests**
