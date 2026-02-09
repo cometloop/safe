@@ -17,6 +17,7 @@
       }
     }
   },
+  "sideEffects": false,
   "files": [
     "dist"
   ],

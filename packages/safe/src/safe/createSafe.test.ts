@@ -2588,4 +2588,246 @@ describe('createSafe', () => {
       expect(results.b.error).toEqual({ code: 'ERR', message: 'fail' })
     })
   })
+
+  describe('onHookError', () => {
+    describe('factory-level onHookError', () => {
+      it('catches default onSuccess hook errors', () => {
+        const hookError = new Error('default hook broke')
+        const onHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onSuccess: () => { throw hookError },
+          onHookError,
+        })
+
+        const result = appSafe.sync(() => 42)
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+
+      it('catches default onError hook errors', () => {
+        const hookError = new Error('default hook broke')
+        const onHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onError: () => { throw hookError },
+          onHookError,
+        })
+
+        const result = appSafe.sync(() => { throw new Error('fail') })
+
+        expect(result[0]).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onError')
+      })
+
+      it('catches default onSettled hook errors', () => {
+        const hookError = new Error('default hook broke')
+        const onHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onSettled: () => { throw hookError },
+          onHookError,
+        })
+
+        const result = appSafe.sync(() => 42)
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSettled')
+      })
+
+      it('catches default onRetry hook errors on async', async () => {
+        const hookError = new Error('default hook broke')
+        const onHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          retry: { times: 1 },
+          onRetry: () => { throw hookError },
+          onHookError,
+        })
+
+        await appSafe.async(() => Promise.reject(new Error('fail')))
+
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onRetry')
+      })
+
+      it('catches per-call hook errors with factory onHookError', () => {
+        const hookError = new Error('per-call hook broke')
+        const onHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onHookError,
+        })
+
+        const result = appSafe.sync(() => 42, {
+          onSuccess: () => { throw hookError },
+        })
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+
+      it('works on wrap method', () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onSuccess: () => { throw hookError },
+          onHookError,
+        })
+
+        const wrapped = appSafe.wrap((x: number) => x * 2)
+        const result = wrapped(5)
+
+        expect(result).toEqual([10, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+
+      it('works on wrapAsync method', async () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onSuccess: () => { throw hookError },
+          onHookError,
+        })
+
+        const wrapped = appSafe.wrapAsync(async (x: number) => x * 2)
+        const result = await wrapped(5)
+
+        expect(result).toEqual([10, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+    })
+
+    describe('per-call onHookError overrides factory', () => {
+      it('per-call onHookError takes precedence over factory onHookError', () => {
+        const hookError = new Error('hook broke')
+        const factoryOnHookError = vi.fn()
+        const perCallOnHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onHookError: factoryOnHookError,
+        })
+
+        appSafe.sync(() => 42, {
+          onSuccess: () => { throw hookError },
+          onHookError: perCallOnHookError,
+        })
+
+        expect(perCallOnHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+        expect(factoryOnHookError).not.toHaveBeenCalled()
+      })
+
+      it('per-call onHookError overrides on async', async () => {
+        const hookError = new Error('hook broke')
+        const factoryOnHookError = vi.fn()
+        const perCallOnHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onHookError: factoryOnHookError,
+        })
+
+        await appSafe.async(() => Promise.resolve(42), {
+          onSuccess: () => { throw hookError },
+          onHookError: perCallOnHookError,
+        })
+
+        expect(perCallOnHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+        expect(factoryOnHookError).not.toHaveBeenCalled()
+      })
+
+      it('per-call onHookError overrides on wrap', () => {
+        const hookError = new Error('hook broke')
+        const factoryOnHookError = vi.fn()
+        const perCallOnHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onHookError: factoryOnHookError,
+        })
+
+        const wrapped = appSafe.wrap((x: number) => x * 2, {
+          onSuccess: () => { throw hookError },
+          onHookError: perCallOnHookError,
+        })
+        wrapped(5)
+
+        expect(perCallOnHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+        expect(factoryOnHookError).not.toHaveBeenCalled()
+      })
+
+      it('per-call onHookError overrides on wrapAsync', async () => {
+        const hookError = new Error('hook broke')
+        const factoryOnHookError = vi.fn()
+        const perCallOnHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onHookError: factoryOnHookError,
+        })
+
+        const wrapped = appSafe.wrapAsync(async (x: number) => x * 2, {
+          onSuccess: () => { throw hookError },
+          onHookError: perCallOnHookError,
+        })
+        await wrapped(5)
+
+        expect(perCallOnHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+        expect(factoryOnHookError).not.toHaveBeenCalled()
+      })
+
+      it('falls back to factory onHookError when per-call does not provide one', () => {
+        const hookError = new Error('hook broke')
+        const factoryOnHookError = vi.fn()
+
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onHookError: factoryOnHookError,
+        })
+
+        appSafe.sync(() => 42, {
+          onSuccess: () => { throw hookError },
+        })
+
+        expect(factoryOnHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+    })
+
+    describe('onHookError does not crash the application', () => {
+      it('factory onHookError that throws is silently swallowed', () => {
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+          onSuccess: () => { throw new Error('hook broke') },
+          onHookError: () => { throw new Error('onHookError broke') },
+        })
+
+        const result = appSafe.sync(() => 42)
+
+        expect(result).toEqual([42, null])
+      })
+
+      it('per-call onHookError that throws is silently swallowed', () => {
+        const appSafe = createSafe({
+          parseError: (e) => String(e),
+        })
+
+        const result = appSafe.sync(() => 42, {
+          onSuccess: () => { throw new Error('hook broke') },
+          onHookError: () => { throw new Error('onHookError broke') },
+        })
+
+        expect(result).toEqual([42, null])
+      })
+    })
+  })
 })

@@ -56,6 +56,7 @@ export type SafeHooks<T, E, TContext extends unknown[] = [], TOut = T> = {
   onSuccess?: (result: TOut, context: TContext) => void
   onError?: (error: E, context: TContext) => void
   onSettled?: (result: TOut | null, error: E | null, context: TContext) => void
+  onHookError?: (error: unknown, hookName: string) => void
 }
 
 // Extended hooks for async operations with retry and timeout support
@@ -96,6 +97,8 @@ export type CreateSafeConfig<E, TResult = never> = {
   retry?: RetryConfig
   /** Optional default timeout for all async operations in milliseconds */
   abortAfter?: number
+  /** Optional callback invoked when any hook throws. Receives the thrown error and the hook name. */
+  onHookError?: (error: unknown, hookName: string) => void
 }
 
 /**

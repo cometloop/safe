@@ -10,6 +10,7 @@ const HOOK_KEY_MAP: Record<keyof SafeAsyncHooks<any, any, any>, true> = {
   onSuccess: true,
   onError: true,
   onSettled: true,
+  onHookError: true,
   onRetry: true,
   retry: true,
   abortAfter: true,
@@ -28,11 +29,19 @@ const isHooks = <T, E, TContext extends unknown[]>(
 // Safely call a hook, swallowing any errors it throws.
 // A logging hook throwing should never crash the application
 // or alter the returned SafeResult.
-const callHook = (fn: (() => void) | undefined): void => {
+const callHook = (
+  fn: (() => void) | undefined,
+  onHookError?: (error: unknown, hookName: string) => void,
+  hookName?: string
+): void => {
   try {
     fn?.()
-  } catch {
-    // Intentionally swallowed
+  } catch (e) {
+    try {
+      onHookError?.(e, hookName ?? 'unknown')
+    } catch {
+      // onHookError itself must never throw
+    }
   }
 }
 
@@ -114,18 +123,20 @@ function safeSync<T, E = Error, TOut = T>(
     resolvedHooks = hooks
   }
 
+  const onHookError = resolvedHooks?.onHookError
+
   try {
     const rawResult = fn()
     const result = (resolvedHooks?.parseResult
       ? resolvedHooks.parseResult(rawResult)
       : rawResult) as TOut
-    callHook(() => resolvedHooks?.onSuccess?.(result, context))
-    callHook(() => resolvedHooks?.onSettled?.(result, null, context))
+    callHook(() => resolvedHooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
+    callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
     return ok(result)
   } catch (e) {
     const error = parseError ? parseError(e) : (e as E)
-    callHook(() => resolvedHooks?.onError?.(error, context))
-    callHook(() => resolvedHooks?.onSettled?.(null, error, context))
+    callHook(() => resolvedHooks?.onError?.(error, context), onHookError, 'onError')
+    callHook(() => resolvedHooks?.onSettled?.(null, error, context), onHookError, 'onSettled')
     return err(error)
   }
 }
@@ -186,6 +197,7 @@ async function safeAsync<T, E = Error, TOut = T>(
 
   const maxAttempts = (resolvedHooks?.retry?.times ?? 0) + 1
   const abortAfter = resolvedHooks?.abortAfter
+  const onHookError = resolvedHooks?.onHookError
   let lastError!: E
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -204,15 +216,15 @@ async function safeAsync<T, E = Error, TOut = T>(
       const result = (resolvedHooks?.parseResult
         ? resolvedHooks.parseResult(rawResult)
         : rawResult) as TOut
-      callHook(() => resolvedHooks?.onSuccess?.(result, context))
-      callHook(() => resolvedHooks?.onSettled?.(result, null, context))
+      callHook(() => resolvedHooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
+      callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
       return ok(result)
     } catch (e) {
       lastError = parseError ? parseError(e) : (e as E)
 
       // If not the last attempt, call onRetry and potentially wait
       if (attempt < maxAttempts) {
-        callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, context))
+        callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, context), onHookError, 'onRetry')
         const waitMs = resolvedHooks?.retry?.waitBefore?.(attempt) ?? 0
         if (waitMs > 0) {
           await sleep(waitMs)
@@ -221,8 +233,8 @@ async function safeAsync<T, E = Error, TOut = T>(
     }
   }
 
-  callHook(() => resolvedHooks?.onError?.(lastError, context))
-  callHook(() => resolvedHooks?.onSettled?.(null, lastError, context))
+  callHook(() => resolvedHooks?.onError?.(lastError, context), onHookError, 'onError')
+  callHook(() => resolvedHooks?.onSettled?.(null, lastError, context), onHookError, 'onSettled')
   return err(lastError)
 }
 
@@ -283,19 +295,21 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
     resolvedHooks = hooks
   }
 
+  const onHookError = resolvedHooks?.onHookError
+
   return (...args: TArgs) => {
     try {
       const rawResult = fn(...args)
       const result = (resolvedHooks?.parseResult
         ? resolvedHooks.parseResult(rawResult)
         : rawResult) as TOut
-      callHook(() => resolvedHooks?.onSuccess?.(result, args))
-      callHook(() => resolvedHooks?.onSettled?.(result, null, args))
+      callHook(() => resolvedHooks?.onSuccess?.(result, args), onHookError, 'onSuccess')
+      callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
       return ok(result)
     } catch (e) {
       const error = parseError ? parseError(e) : (e as E)
-      callHook(() => resolvedHooks?.onError?.(error, args))
-      callHook(() => resolvedHooks?.onSettled?.(null, error, args))
+      callHook(() => resolvedHooks?.onError?.(error, args), onHookError, 'onError')
+      callHook(() => resolvedHooks?.onSettled?.(null, error, args), onHookError, 'onSettled')
       return err(error)
     }
   }
@@ -362,6 +376,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
 
   const maxAttempts = (resolvedHooks?.retry?.times ?? 0) + 1
   const abortAfter = resolvedHooks?.abortAfter
+  const onHookError = resolvedHooks?.onHookError
 
   return async (...args: TArgs) => {
     let lastError!: E
@@ -382,15 +397,15 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
         const result = (resolvedHooks?.parseResult
           ? resolvedHooks.parseResult(rawResult)
           : rawResult) as TOut
-        callHook(() => resolvedHooks?.onSuccess?.(result, args))
-        callHook(() => resolvedHooks?.onSettled?.(result, null, args))
+        callHook(() => resolvedHooks?.onSuccess?.(result, args), onHookError, 'onSuccess')
+        callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
         return ok(result)
       } catch (e) {
         lastError = parseError ? parseError(e) : (e as E)
 
         // If not the last attempt, call onRetry and potentially wait
         if (attempt < maxAttempts) {
-          callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, args))
+          callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, args), onHookError, 'onRetry')
           const waitMs = resolvedHooks?.retry?.waitBefore?.(attempt) ?? 0
           if (waitMs > 0) {
             await sleep(waitMs)
@@ -399,8 +414,8 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
       }
     }
 
-    callHook(() => resolvedHooks?.onError?.(lastError, args))
-    callHook(() => resolvedHooks?.onSettled?.(null, lastError, args))
+    callHook(() => resolvedHooks?.onError?.(lastError, args), onHookError, 'onError')
+    callHook(() => resolvedHooks?.onSettled?.(null, lastError, args), onHookError, 'onSettled')
     return err(lastError)
   }
 }

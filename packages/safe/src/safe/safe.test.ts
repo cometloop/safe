@@ -3851,4 +3851,234 @@ describe('safe', () => {
       })
     })
   })
+
+  describe('onHookError', () => {
+    describe('sync', () => {
+      it('calls onHookError when onSuccess throws', () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const result = safe.sync(() => 42, {
+          onSuccess: () => { throw hookError },
+          onHookError,
+        })
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+
+      it('calls onHookError when onError throws', () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const result = safe.sync(
+          () => { throw new Error('original') },
+          {
+            onError: () => { throw hookError },
+            onHookError,
+          },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onError')
+      })
+
+      it('calls onHookError when onSettled throws', () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const result = safe.sync(() => 42, {
+          onSettled: () => { throw hookError },
+          onHookError,
+        })
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSettled')
+      })
+
+      it('does not crash when onHookError itself throws', () => {
+        const result = safe.sync(() => 42, {
+          onSuccess: () => { throw new Error('hook broke') },
+          onHookError: () => { throw new Error('onHookError broke') },
+        })
+
+        expect(result).toEqual([42, null])
+      })
+
+      it('still returns correct result when onHookError is provided and no hooks throw', () => {
+        const onHookError = vi.fn()
+
+        const result = safe.sync(() => 42, {
+          onSuccess: vi.fn(),
+          onHookError,
+        })
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('async', () => {
+      it('calls onHookError when onSuccess throws', async () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const result = await safe.async(() => Promise.resolve(42), {
+          onSuccess: () => { throw hookError },
+          onHookError,
+        })
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+
+      it('calls onHookError when onError throws', async () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const result = await safe.async(
+          () => Promise.reject(new Error('original')),
+          {
+            onError: () => { throw hookError },
+            onHookError,
+          },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onError')
+      })
+
+      it('calls onHookError when onRetry throws', async () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const result = await safe.async(
+          () => Promise.reject(new Error('fail')),
+          {
+            retry: { times: 1 },
+            onRetry: () => { throw hookError },
+            onHookError,
+          },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onRetry')
+      })
+
+      it('does not crash when onHookError itself throws (async)', async () => {
+        const result = await safe.async(() => Promise.resolve(42), {
+          onSuccess: () => { throw new Error('hook broke') },
+          onHookError: () => { throw new Error('onHookError broke') },
+        })
+
+        expect(result).toEqual([42, null])
+      })
+    })
+
+    describe('wrap', () => {
+      it('calls onHookError when onSuccess throws', () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const wrapped = safe.wrap((x: number) => x * 2, {
+          onSuccess: () => { throw hookError },
+          onHookError,
+        })
+        const result = wrapped(5)
+
+        expect(result).toEqual([10, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+
+      it('calls onHookError when onError throws', () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const wrapped = safe.wrap(
+          () => { throw new Error('original') },
+          {
+            onError: () => { throw hookError },
+            onHookError,
+          },
+        )
+        const result = wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onError')
+      })
+    })
+
+    describe('wrapAsync', () => {
+      it('calls onHookError when onSuccess throws', async () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const wrapped = safe.wrapAsync(
+          async (x: number) => x * 2,
+          {
+            onSuccess: () => { throw hookError },
+            onHookError,
+          },
+        )
+        const result = await wrapped(5)
+
+        expect(result).toEqual([10, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+
+      it('calls onHookError when onRetry throws', async () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const wrapped = safe.wrapAsync(
+          async () => { throw new Error('fail') },
+          {
+            retry: { times: 1 },
+            onRetry: () => { throw hookError },
+            onHookError,
+          },
+        )
+        const result = await wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onRetry')
+      })
+    })
+
+    describe('with parseError', () => {
+      it('works with parseError and onHookError on sync', () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const result = safe.sync(
+          () => 42,
+          (e: unknown) => String(e),
+          {
+            onSuccess: () => { throw hookError },
+            onHookError,
+          },
+        )
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+
+      it('works with parseError and onHookError on async', async () => {
+        const hookError = new Error('hook broke')
+        const onHookError = vi.fn()
+
+        const result = await safe.async(
+          () => Promise.resolve(42),
+          (e: unknown) => String(e),
+          {
+            onSuccess: () => { throw hookError },
+            onHookError,
+          },
+        )
+
+        expect(result).toEqual([42, null])
+        expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+    })
+  })
 })

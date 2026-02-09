@@ -40,53 +40,62 @@ export function createSafe<E, TResult = never>(config: CreateSafeConfig<E, TResu
     onRetry: defaultOnRetry,
     retry: defaultRetry,
     abortAfter: defaultAbortAfter,
+    onHookError: defaultOnHookError,
   } = config
 
   const mergeHooks = <T, TContext extends unknown[], TOut>(
     hooks?: SafeHooks<T, E, TContext, TOut>
-  ): SafeHooks<T, E, TContext, TOut> => ({
-    parseResult: (hooks?.parseResult
-      ?? defaultParseResult) as SafeHooks<T, E, TContext, TOut>['parseResult'],
-    onSuccess: (result, context) => {
-      callHook(() => defaultOnSuccess?.(result))
-      callHook(() => hooks?.onSuccess?.(result, context))
-    },
-    onError: (error, context) => {
-      callHook(() => defaultOnError?.(error))
-      callHook(() => hooks?.onError?.(error, context))
-    },
-    onSettled: (result, error, context) => {
-      callHook(() => defaultOnSettled?.(result, error))
-      callHook(() => hooks?.onSettled?.(result, error, context))
-    },
-  })
+  ): SafeHooks<T, E, TContext, TOut> => {
+    const onHookError = hooks?.onHookError ?? defaultOnHookError
+    return {
+      parseResult: (hooks?.parseResult
+        ?? defaultParseResult) as SafeHooks<T, E, TContext, TOut>['parseResult'],
+      onSuccess: (result, context) => {
+        callHook(() => defaultOnSuccess?.(result), onHookError, 'onSuccess')
+        callHook(() => hooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
+      },
+      onError: (error, context) => {
+        callHook(() => defaultOnError?.(error), onHookError, 'onError')
+        callHook(() => hooks?.onError?.(error, context), onHookError, 'onError')
+      },
+      onSettled: (result, error, context) => {
+        callHook(() => defaultOnSettled?.(result, error), onHookError, 'onSettled')
+        callHook(() => hooks?.onSettled?.(result, error, context), onHookError, 'onSettled')
+      },
+      onHookError,
+    }
+  }
 
   const mergeAsyncHooks = <T, TContext extends unknown[], TOut>(
     hooks?: SafeAsyncHooks<T, E, TContext, TOut>
-  ): SafeAsyncHooks<T, E, TContext, TOut> => ({
-    parseResult: (hooks?.parseResult
-      ?? defaultParseResult) as SafeAsyncHooks<T, E, TContext, TOut>['parseResult'],
-    onSuccess: (result, context) => {
-      callHook(() => defaultOnSuccess?.(result))
-      callHook(() => hooks?.onSuccess?.(result, context))
-    },
-    onError: (error, context) => {
-      callHook(() => defaultOnError?.(error))
-      callHook(() => hooks?.onError?.(error, context))
-    },
-    onSettled: (result, error, context) => {
-      callHook(() => defaultOnSettled?.(result, error))
-      callHook(() => hooks?.onSettled?.(result, error, context))
-    },
-    onRetry: (error, attempt, context) => {
-      callHook(() => defaultOnRetry?.(error, attempt))
-      callHook(() => hooks?.onRetry?.(error, attempt, context))
-    },
-    // Per-call retry completely overrides default retry
-    retry: hooks?.retry ?? defaultRetry,
-    // Per-call abortAfter overrides default abortAfter
-    abortAfter: hooks?.abortAfter ?? defaultAbortAfter,
-  })
+  ): SafeAsyncHooks<T, E, TContext, TOut> => {
+    const onHookError = hooks?.onHookError ?? defaultOnHookError
+    return {
+      parseResult: (hooks?.parseResult
+        ?? defaultParseResult) as SafeAsyncHooks<T, E, TContext, TOut>['parseResult'],
+      onSuccess: (result, context) => {
+        callHook(() => defaultOnSuccess?.(result), onHookError, 'onSuccess')
+        callHook(() => hooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
+      },
+      onError: (error, context) => {
+        callHook(() => defaultOnError?.(error), onHookError, 'onError')
+        callHook(() => hooks?.onError?.(error, context), onHookError, 'onError')
+      },
+      onSettled: (result, error, context) => {
+        callHook(() => defaultOnSettled?.(result, error), onHookError, 'onSettled')
+        callHook(() => hooks?.onSettled?.(result, error, context), onHookError, 'onSettled')
+      },
+      onRetry: (error, attempt, context) => {
+        callHook(() => defaultOnRetry?.(error, attempt), onHookError, 'onRetry')
+        callHook(() => hooks?.onRetry?.(error, attempt, context), onHookError, 'onRetry')
+      },
+      // Per-call retry completely overrides default retry
+      retry: hooks?.retry ?? defaultRetry,
+      // Per-call abortAfter overrides default abortAfter
+      abortAfter: hooks?.abortAfter ?? defaultAbortAfter,
+      onHookError,
+    }
+  }
 
   return {
     sync: <T, TOut = [TResult] extends [never] ? T : TResult>(
