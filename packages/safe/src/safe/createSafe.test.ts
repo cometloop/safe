@@ -2805,6 +2805,23 @@ describe('createSafe', () => {
       expect(data).toBeNull()
       expect(error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
     })
+
+    it('handles a function that throws synchronously (before returning a promise)', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'SYNC_THROW' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+      })
+
+      const [data, error] = await appSafe.all({
+        good: () => Promise.resolve(1),
+        bad: () => { throw new Error('sync kaboom') },
+      })
+
+      expect(data).toBeNull()
+      expect(error).toEqual({ code: 'SYNC_THROW', message: 'sync kaboom' })
+    })
   })
 
   describe('allSettled', () => {
@@ -3130,6 +3147,58 @@ describe('createSafe', () => {
         })
 
         expect(factoryOnHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+    })
+
+    describe('falsy defaultError values', () => {
+      it('defaultError: empty string is returned when parseError throws', () => {
+        const appSafe = createSafe({
+          parseError: () => { throw new Error('parseError broke') },
+          defaultError: '',
+        })
+
+        const result = appSafe.sync(() => { throw new Error('original') })
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe('')
+        expect(result.ok).toBe(false)
+      })
+
+      it('defaultError: 0 is returned when parseError throws', () => {
+        const appSafe = createSafe({
+          parseError: () => { throw new Error('parseError broke') },
+          defaultError: 0,
+        })
+
+        const result = appSafe.sync(() => { throw new Error('original') })
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(0)
+        expect(result.ok).toBe(false)
+      })
+
+      it('defaultError: false is returned when parseError throws', () => {
+        const appSafe = createSafe({
+          parseError: () => { throw new Error('parseError broke') },
+          defaultError: false,
+        })
+
+        const result = appSafe.sync(() => { throw new Error('original') })
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(false)
+        expect(result.ok).toBe(false)
+      })
+
+      it('defaultError: null is returned when parseError throws', () => {
+        const appSafe = createSafe({
+          parseError: () => { throw new Error('parseError broke') },
+          defaultError: null,
+        })
+
+        const result = appSafe.sync(() => { throw new Error('original') })
+        expect(result[0]).toBeNull()
+        // defaultError is null but `defaultError ?? toError(e)` falls through to toError
+        // because null is nullish — so the fallback Error is returned
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result.ok).toBe(false)
       })
     })
 

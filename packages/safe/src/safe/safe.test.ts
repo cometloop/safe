@@ -4691,6 +4691,50 @@ describe('safe', () => {
         expect(result[1]).toBeUndefined()
         expect(result.ok).toBe(false)
       })
+
+      it('times: -100 results in zero iterations (same as -1)', async () => {
+        const fn = vi.fn(() => Promise.reject(new Error('fail')))
+
+        const result = await safe.async(fn, {
+          retry: { times: -100 },
+        })
+
+        expect(fn).not.toHaveBeenCalled()
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeUndefined()
+        expect(result.ok).toBe(false)
+      })
+    })
+
+    describe('very large retry.times', () => {
+      it('times: 10000 does not blow up (fn succeeds on first try)', async () => {
+        const fn = vi.fn(() => Promise.resolve('ok'))
+
+        const [value, error] = await safe.async(fn, {
+          retry: { times: 10000 },
+        })
+
+        expect(value).toBe('ok')
+        expect(error).toBeNull()
+        expect(fn).toHaveBeenCalledTimes(1)
+      })
+
+      it('times: 10000 retries until success without stack overflow', async () => {
+        let callCount = 0
+        const fn = vi.fn(async () => {
+          callCount++
+          if (callCount < 50) throw new Error(`fail ${callCount}`)
+          return 'finally'
+        })
+
+        const [value, error] = await safe.async(fn, {
+          retry: { times: 10000 },
+        })
+
+        expect(value).toBe('finally')
+        expect(error).toBeNull()
+        expect(fn).toHaveBeenCalledTimes(50)
+      })
     })
 
     describe('waitBefore returning negative', () => {
