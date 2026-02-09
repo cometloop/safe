@@ -174,3 +174,62 @@ const [data, error] = safe.sync(
 {% callout title="parseResult vs hooks" type="note" %}
 Unlike hooks, `parseResult` **does** affect the return value — it transforms the result type. Hooks (`onSuccess`, `onError`, `onSettled`) are fire-and-forget side effects that cannot modify the `SafeResult` tuple.
 {% /callout %}
+
+---
+
+## onHookError
+
+By default, hook errors are silently swallowed — a throwing hook never crashes the application or alters the `SafeResult`. The optional `onHookError` callback lets you observe these failures for debugging.
+
+```ts
+const [data, error] = safe.sync(() => fetchData(), {
+  onSuccess: (result) => {
+    logger.lgo(result) // typo — throws TypeError
+  },
+  onHookError: (err, hookName) => {
+    // err = TypeError, hookName = 'onSuccess'
+    console.warn(`Hook "${hookName}" failed:`, err)
+  },
+})
+// data is still returned correctly
+```
+
+The callback receives:
+
+- `error` — The value thrown by the hook (`unknown`)
+- `hookName` — Which hook threw: `'onSuccess'`, `'onError'`, `'onSettled'`, or `'onRetry'`
+
+### Safety guarantee
+
+If `onHookError` itself throws, that error is also silently swallowed. The `SafeResult` is never affected by hook failures.
+
+### With createSafe
+
+Set a factory-level `onHookError` to catch hook errors across all operations:
+
+```ts
+const appSafe = createSafe({
+  parseError: (e) => String(e),
+  onSuccess: (result) => {
+    logger.log(result) // might throw
+  },
+  onHookError: (err, hookName) => {
+    monitoring.trackHookFailure(hookName, err)
+  },
+})
+```
+
+Per-call `onHookError` **overrides** the factory-level callback (it does not merge):
+
+```ts
+appSafe.sync(() => riskyOperation(), {
+  onHookError: (err, hookName) => {
+    // This replaces the factory onHookError for this call
+    customLogger.warn(`${hookName} failed`, err)
+  },
+})
+```
+
+{% callout title="Not a hook chain" type="note" %}
+Unlike `onSuccess`/`onError`/`onSettled` which merge (default runs first, then per-call), `onHookError` uses simple override semantics — per-call replaces factory-level. This is because `onHookError` is an error handler, not a side-effect hook.
+{% /callout %}

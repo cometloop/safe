@@ -322,6 +322,22 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
  * errors and returns `[null, error]` instead of throwing. Supports retry
  * and timeout via hooks.
  *
+ * **Note on `abortAfter`:** When configured, `abortAfter` acts as an external
+ * deadline — the promise is rejected with a `TimeoutError` after the specified
+ * duration, but the wrapped function does **not** receive an `AbortSignal`.
+ * This means the underlying operation will continue running in the background
+ * even after the timeout fires. If you need cooperative cancellation (e.g.
+ * passing a signal to `fetch`), use {@link safeAsync | safe.async} instead,
+ * which passes the signal directly to the function:
+ *
+ * ```typescript
+ * // Cooperative cancellation with safe.async
+ * const [data, error] = await safe.async(
+ *   (signal) => fetch('/api/data', { signal }),
+ *   { abortAfter: 5000 }
+ * )
+ * ```
+ *
  * @param fn - The async function to wrap.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
  *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
@@ -453,7 +469,7 @@ async function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
   const results = await Promise.all(values)
 
   for (const result of results) {
-    if (result[1] !== null) {
+    if (!result.ok) {
       return err(result[1]) as any
     }
   }

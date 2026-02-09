@@ -27,6 +27,7 @@ type SafeHooks<T, E, TContext extends unknown[] = [], TOut = T> = {
   onSuccess?: (result: TOut, context: TContext) => void
   onError?: (error: E, context: TContext) => void
   onSettled?: (result: TOut | null, error: E | null, context: TContext) => void
+  onHookError?: (error: unknown, hookName: string) => void
 }
 ```
 
@@ -38,6 +39,7 @@ Lifecycle hooks and result transformation:
 - `TOut` — The transformed result type (defaults to `T` when `parseResult` is not provided)
 - `parseResult` — Optional function that transforms the successful result from type `T` to type `TOut`. See [Result transformation](/docs/result-transformation)
 - `onSettled` — Optional hook called after either success or error
+- `onHookError` — Optional callback invoked when any hook throws. Receives the thrown error and the hook name. See [Hooks](/docs/hooks#onhookerror)
 
 ---
 
@@ -112,6 +114,7 @@ type CreateSafeConfig<E, TResult = never> = {
   onRetry?: (error: E, attempt: number) => void
   retry?: RetryConfig
   abortAfter?: number
+  onHookError?: (error: unknown, hookName: string) => void
 }
 ```
 
@@ -125,6 +128,7 @@ Configuration for creating a pre-configured safe instance:
 - `onRetry` — Optional default hook called before each retry for async operations
 - `retry` — Optional default retry configuration for async operations
 - `abortAfter` — Optional default timeout for all async operations in milliseconds
+- `onHookError` — Optional callback invoked when any hook throws. Per-call `onHookError` overrides the factory-level callback. See [Hooks](/docs/hooks#onhookerror)
 
 ---
 

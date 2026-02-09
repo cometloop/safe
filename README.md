@@ -97,8 +97,8 @@ src/
     ├── types.ts          # Type definitions (SafeResult, SafeHooks, SafeAsyncHooks, RetryConfig, TimeoutError, etc.)
     ├── safe.ts           # Core functions (sync, async, wrap, wrapAsync, all, allSettled) with retry and timeout support
     ├── createSafe.ts     # Factory function for pre-configured instances
-    ├── safe.test.ts      # Tests for core functions (265 tests)
-    └── createSafe.test.ts # Tests for factory function (145 tests)
+    ├── safe.test.ts      # Tests for core functions (280 tests)
+    └── createSafe.test.ts # Tests for factory function (164 tests)
 ```
 
 | File                                    | Description                                                                                                                      |
@@ -604,6 +604,7 @@ type CreateSafeConfig<E, TResult = never> = {
   onRetry?: (error: E, attempt: number) => void // Optional: called before each retry (async only)
   retry?: RetryConfig                      // Optional: default retry configuration (async only)
   abortAfter?: number                      // Optional: default timeout (async only)
+  onHookError?: (error: unknown, hookName: string) => void // Optional: called when a hook throws
 }
 ```
 
@@ -935,6 +936,7 @@ const [data, error] = await apiSafe.async(() => fetchData(), {
 - `onSuccess`: Default hook called first, then per-call hook
 - `onError`: Default hook called first, then per-call hook
 - `onRetry`: Default hook called first, then per-call hook
+- `onHookError`: Per-call **overrides** factory-level (not merged)
 - `retry`: Per-call config **completely overrides** default config (not merged)
 
 ---
@@ -1276,6 +1278,7 @@ type SafeHooks<T, E, TContext extends unknown[] = [], TOut = T> = {
   onSuccess?: (result: TOut, context: TContext) => void
   onError?: (error: E, context: TContext) => void
   onSettled?: (result: TOut | null, error: E | null, context: TContext) => void
+  onHookError?: (error: unknown, hookName: string) => void
 }
 ```
 
@@ -1287,6 +1290,7 @@ Lifecycle hooks and result transformation:
 - `TOut` - The transformed result type (defaults to `T` when `parseResult` is not provided)
 - `parseResult` - Optional function that transforms the successful result from type `T` to type `TOut`
 - `onSettled` - Optional hook called after either success or error
+- `onHookError` - Optional callback invoked when any hook throws. Receives the thrown error and the hook name (e.g. `'onSuccess'`, `'onError'`). If not provided, hook errors are silently swallowed. If `onHookError` itself throws, that error is also swallowed.
 
 ### SafeAsyncHooks
 
@@ -1353,6 +1357,7 @@ type CreateSafeConfig<E, TResult = never> = {
   onRetry?: (error: E, attempt: number) => void
   retry?: RetryConfig
   abortAfter?: number
+  onHookError?: (error: unknown, hookName: string) => void
 }
 ```
 
@@ -1366,6 +1371,7 @@ Configuration for creating a pre-configured safe instance:
 - `onRetry` - Optional default hook called before each retry for async operations
 - `retry` - Optional default retry configuration for async operations
 - `abortAfter` - Optional default timeout for all async operations in milliseconds
+- `onHookError` - Optional callback invoked when any hook throws. Per-call `onHookError` overrides the factory-level callback
 
 ### SafeInstance
 
@@ -1433,6 +1439,25 @@ const safeOp = safe.wrap(
   }
 )
 ```
+
+**Hook error visibility with `onHookError`:**
+
+By default, hook errors are silently swallowed — a throwing hook never crashes the application or alters the `SafeResult`. The optional `onHookError` callback lets you observe these failures for debugging:
+
+```typescript
+const [data, error] = safe.sync(() => fetchData(), {
+  onSuccess: (result) => {
+    logger.lgo(result) // typo — throws TypeError
+  },
+  onHookError: (err, hookName) => {
+    // err = TypeError, hookName = 'onSuccess'
+    console.warn(`Hook "${hookName}" failed:`, err)
+  },
+})
+// data is still returned correctly — onHookError is purely observational
+```
+
+If `onHookError` itself throws, that error is also silently swallowed.
 
 **Common use cases for hooks:**
 
@@ -2523,7 +2548,7 @@ async function processOrder(orderId: string) {
 | [src/safe/safe.ts](src/safe/safe.ts)                       | Core functions (`sync`, `async`, `wrap`, `wrapAsync`, `all`, `allSettled`) with retry and timeout support                         |
 | [src/safe/createSafe.ts](src/safe/createSafe.ts)           | Factory function for pre-configured instances                                                                                     |
 | [src/safe/index.ts](src/safe/index.ts)                     | Barrel exports                                                                                                                    |
-| [src/safe/safe.test.ts](src/safe/safe.test.ts)             | Tests for core functions (265 tests)                                                                                              |
-| [src/safe/createSafe.test.ts](src/safe/createSafe.test.ts) | Tests for factory function (145 tests)                                                                                            |
+| [src/safe/safe.test.ts](src/safe/safe.test.ts)             | Tests for core functions (280 tests)                                                                                              |
+| [src/safe/createSafe.test.ts](src/safe/createSafe.test.ts) | Tests for factory function (164 tests)                                                                                            |
 
-**Total: 410 tests**
+**Total: 444 tests**
