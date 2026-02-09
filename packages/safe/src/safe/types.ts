@@ -115,4 +115,15 @@ export type SafeInstance<E, TResult = never> = {
     fn: (...args: TArgs) => Promise<T>,
     hooks?: SafeAsyncHooks<T, E, TArgs, TOut>
   ) => (...args: TArgs) => Promise<SafeResult<TOut, E>>
+  all: <T extends Record<string, Promise<SafeResult<any, any>>>>(
+    promises: T
+  ) => Promise<
+    SafeResult<
+      { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never },
+      T[keyof T] extends Promise<SafeResult<any, infer EE>> ? EE : never
+    >
+  >
+  allSettled: <T extends Record<string, Promise<SafeResult<any, any>>>>(
+    promises: T
+  ) => Promise<{ [K in keyof T]: Awaited<T[K]> }>
 }

@@ -3480,6 +3480,190 @@ describe('safe', () => {
     })
   })
 
+  describe('all', () => {
+    it('returns ok with named values when all succeed', async () => {
+      const [data, error] = await safe.all({
+        user: safe.async(() => Promise.resolve({ name: 'Alice' })),
+        posts: safe.async(() => Promise.resolve([1, 2, 3])),
+      })
+
+      expect(error).toBeNull()
+      expect(data).toEqual({ user: { name: 'Alice' }, posts: [1, 2, 3] })
+      expect(data!.user).toEqual({ name: 'Alice' })
+      expect(data!.posts).toEqual([1, 2, 3])
+    })
+
+    it('returns err with first error when one fails', async () => {
+      const [data, error] = await safe.all({
+        user: safe.async(() => Promise.resolve({ name: 'Alice' })),
+        posts: safe.async(() => Promise.reject(new Error('fetch failed'))),
+      })
+
+      expect(data).toBeNull()
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe('fetch failed')
+    })
+
+    it('returns first error when multiple fail', async () => {
+      const error1 = new Error('first')
+      const error2 = new Error('second')
+
+      const [data, error] = await safe.all({
+        a: safe.async(() => Promise.reject(error1)),
+        b: safe.async(() => Promise.reject(error2)),
+      })
+
+      expect(data).toBeNull()
+      expect(error).toBe(error1)
+    })
+
+    it('returns ok with empty object for empty input', async () => {
+      const [data, error] = await safe.all({})
+
+      expect(error).toBeNull()
+      expect(data).toEqual({})
+    })
+
+    it('preserves result values by key', async () => {
+      const [data, error] = await safe.all({
+        count: safe.async(() => Promise.resolve(42)),
+        label: safe.async(() => Promise.resolve('hello')),
+        flag: safe.async(() => Promise.resolve(true)),
+      })
+
+      expect(error).toBeNull()
+      expect(data!.count).toBe(42)
+      expect(data!.label).toBe('hello')
+      expect(data!.flag).toBe(true)
+    })
+
+    it('works with per-operation parseError', async () => {
+      const parseError = (e: unknown) => ({
+        code: 'FAIL' as const,
+        message: e instanceof Error ? e.message : 'unknown',
+      })
+
+      const [data, error] = await safe.all({
+        a: safe.async(() => Promise.resolve('ok')),
+        b: safe.async(() => Promise.reject(new Error('boom')), parseError),
+      })
+
+      expect(data).toBeNull()
+      expect(error).toEqual({ code: 'FAIL', message: 'boom' })
+    })
+
+    it('works with hooks on individual operations', async () => {
+      const onSuccess = vi.fn()
+
+      const [data, error] = await safe.all({
+        val: safe.async(() => Promise.resolve(10), { onSuccess }),
+      })
+
+      expect(error).toBeNull()
+      expect(data!.val).toBe(10)
+      expect(onSuccess).toHaveBeenCalledWith(10, [])
+    })
+
+    it('result has tagged properties on success', async () => {
+      const result = await safe.all({
+        x: safe.async(() => Promise.resolve(1)),
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.value).toEqual({ x: 1 })
+      expect(result.error).toBeNull()
+    })
+
+    it('result has tagged properties on error', async () => {
+      const result = await safe.all({
+        x: safe.async(() => Promise.reject(new Error('fail'))),
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.value).toBeNull()
+      expect(result.error).toBeInstanceOf(Error)
+    })
+  })
+
+  describe('allSettled', () => {
+    it('returns all success results as named SafeResults', async () => {
+      const results = await safe.allSettled({
+        user: safe.async(() => Promise.resolve({ name: 'Alice' })),
+        posts: safe.async(() => Promise.resolve([1, 2, 3])),
+      })
+
+      expect(results.user.ok).toBe(true)
+      expect(results.user.value).toEqual({ name: 'Alice' })
+      expect(results.user.error).toBeNull()
+      expect(results.user[0]).toEqual({ name: 'Alice' })
+      expect(results.user[1]).toBeNull()
+
+      expect(results.posts.ok).toBe(true)
+      expect(results.posts.value).toEqual([1, 2, 3])
+    })
+
+    it('returns all error results as named SafeResults', async () => {
+      const results = await safe.allSettled({
+        a: safe.async(() => Promise.reject(new Error('err a'))),
+        b: safe.async(() => Promise.reject(new Error('err b'))),
+      })
+
+      expect(results.a.ok).toBe(false)
+      expect(results.a.value).toBeNull()
+      expect(results.a.error).toBeInstanceOf(Error)
+      expect((results.a.error as Error).message).toBe('err a')
+
+      expect(results.b.ok).toBe(false)
+      expect((results.b.error as Error).message).toBe('err b')
+    })
+
+    it('returns mixed success and error results', async () => {
+      const results = await safe.allSettled({
+        good: safe.async(() => Promise.resolve('yes')),
+        bad: safe.async(() => Promise.reject(new Error('no'))),
+      })
+
+      expect(results.good.ok).toBe(true)
+      expect(results.good.value).toBe('yes')
+
+      expect(results.bad.ok).toBe(false)
+      expect((results.bad.error as Error).message).toBe('no')
+    })
+
+    it('returns empty object for empty input', async () => {
+      const results = await safe.allSettled({})
+
+      expect(results).toEqual({})
+    })
+
+    it('each result is a proper SafeResult with tagged properties', async () => {
+      const results = await safe.allSettled({
+        val: safe.async(() => Promise.resolve(42)),
+      })
+
+      const r = results.val
+      expect(r.ok).toBe(true)
+      expect(r.value).toBe(42)
+      expect(r.error).toBeNull()
+      expect(r[0]).toBe(42)
+      expect(r[1]).toBeNull()
+    })
+
+    it('works with per-operation parseError', async () => {
+      const parseError = (e: unknown) => ({
+        code: 'CUSTOM' as const,
+        message: e instanceof Error ? e.message : 'unknown',
+      })
+
+      const results = await safe.allSettled({
+        item: safe.async(() => Promise.reject(new Error('oops')), parseError),
+      })
+
+      expect(results.item.ok).toBe(false)
+      expect(results.item.error).toEqual({ code: 'CUSTOM', message: 'oops' })
+    })
+  })
+
   describe('tagged result properties (.ok, .value, .error)', () => {
     describe('sync', () => {
       it('has ok: true and value/error properties on success', () => {

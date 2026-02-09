@@ -404,12 +404,98 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
   }
 }
 
+/**
+ * Run multiple safe-wrapped async operations in parallel and return all values or the first error.
+ *
+ * Accepts an object map of `Promise<SafeResult>` entries. If all succeed, returns
+ * `ok({ key: value, ... })` with unwrapped values. If any fail, returns `err(firstError)`.
+ *
+ * @param promises - An object map of `Promise<SafeResult<T, E>>` entries.
+ * @returns A `Promise<SafeResult<{ [K]: V }, E>>` — all values on success, first error on failure.
+ *
+ * @example
+ * ```typescript
+ * const [data, error] = await safe.all({
+ *   user: safe.async(() => fetchUser()),
+ *   posts: safe.async(() => fetchPosts()),
+ * })
+ * if (error) return handleError(error)
+ * data.user   // User
+ * data.posts  // Post[]
+ * ```
+ */
+async function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
+  promises: T
+): Promise<
+  SafeResult<
+    { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never },
+    T[keyof T] extends Promise<SafeResult<any, infer E>> ? E : never
+  >
+> {
+  const keys = Object.keys(promises)
+  const values = Object.values(promises)
+  const results = await Promise.all(values)
+
+  for (const result of results) {
+    if (result[1] !== null) {
+      return err(result[1]) as any
+    }
+  }
+
+  const obj: Record<string, unknown> = {}
+  for (let i = 0; i < keys.length; i++) {
+    obj[keys[i]] = results[i][0]
+  }
+
+  return ok(obj) as any
+}
+
+/**
+ * Run multiple safe-wrapped async operations in parallel and return all individual results.
+ *
+ * Accepts an object map of `Promise<SafeResult>` entries. Always returns all results
+ * as named SafeResult entries — never fails at the group level.
+ *
+ * @param promises - An object map of `Promise<SafeResult<T, E>>` entries.
+ * @returns A `Promise<{ [K]: SafeResult<V, E> }>` — each key maps to its individual result.
+ *
+ * @example
+ * ```typescript
+ * const results = await safe.allSettled({
+ *   user: safe.async(() => fetchUser()),
+ *   posts: safe.async(() => fetchPosts()),
+ * })
+ * if (results.user.ok) {
+ *   results.user.value  // User
+ * }
+ * if (!results.posts.ok) {
+ *   results.posts.error  // Error
+ * }
+ * ```
+ */
+async function safeAllSettled<T extends Record<string, Promise<SafeResult<any, any>>>>(
+  promises: T
+): Promise<{ [K in keyof T]: Awaited<T[K]> }> {
+  const keys = Object.keys(promises)
+  const values = Object.values(promises)
+  const results = await Promise.all(values)
+
+  const obj: Record<string, unknown> = {}
+  for (let i = 0; i < keys.length; i++) {
+    obj[keys[i]] = results[i]
+  }
+
+  return obj as any
+}
+
 export const safe = {
   sync: safeSync,
   async: safeAsync,
   wrap,
   wrapAsync,
+  all: safeAll,
+  allSettled: safeAllSettled,
 } as const
 
 // Export individual functions for use by createSafe
-export { safeSync, safeAsync, wrap, wrapAsync }
+export { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled }

@@ -2442,4 +2442,62 @@ describe('createSafe', () => {
       })
     })
   })
+
+  describe('all', () => {
+    it('works with pre-configured error type', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'ERR' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+      })
+
+      const [data, error] = await appSafe.all({
+        a: appSafe.async(() => Promise.resolve(1)),
+        b: appSafe.async(() => Promise.resolve('two')),
+      })
+
+      expect(error).toBeNull()
+      expect(data).toEqual({ a: 1, b: 'two' })
+    })
+
+    it('returns error with pre-configured error type on failure', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'ERR' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+      })
+
+      const [data, error] = await appSafe.all({
+        a: appSafe.async(() => Promise.resolve(1)),
+        b: appSafe.async(() => Promise.reject(new Error('boom'))),
+      })
+
+      expect(data).toBeNull()
+      expect(error).toEqual({ code: 'ERR', message: 'boom' })
+    })
+  })
+
+  describe('allSettled', () => {
+    it('works with pre-configured error type', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'ERR' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+      })
+
+      const results = await appSafe.allSettled({
+        a: appSafe.async(() => Promise.resolve(1)),
+        b: appSafe.async(() => Promise.reject(new Error('fail'))),
+      })
+
+      expect(results.a.ok).toBe(true)
+      expect(results.a.value).toBe(1)
+
+      expect(results.b.ok).toBe(false)
+      expect(results.b.error).toEqual({ code: 'ERR', message: 'fail' })
+    })
+  })
 })

@@ -1,5 +1,5 @@
 import type { SafeResult, SafeHooks, SafeAsyncHooks, CreateSafeConfig, SafeInstance } from './types'
-import { safeSync, safeAsync, wrap, wrapAsync } from './safe'
+import { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled } from './safe'
 
 /**
  * Create a pre-configured safe instance with a fixed error mapping function
@@ -113,5 +113,7 @@ export function createSafe<E, TResult = never>(config: CreateSafeConfig<E, TResu
     ): ((...args: TArgs) => Promise<SafeResult<TOut, E>>) => {
       return wrapAsync(fn, parseError, mergeAsyncHooks<T, TArgs, TOut>(hooks))
     },
+    all: safeAll,
+    allSettled: safeAllSettled,
   }
 }
