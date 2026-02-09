@@ -117,6 +117,7 @@ const dbSafe = createSafe({
     message: e instanceof Error ? e.message : String(e),
     timestamp: new Date(),
   }),
+  defaultError: { code: 'UNKNOWN', message: 'Unknown error', timestamp: new Date() },
 })
 
 // All operations use the same error mapper
@@ -127,3 +128,59 @@ const [order, error2] = await dbSafe.async(() => db.order.findById(orderId))
 {% callout title="TypeScript inference" type="note" %}
 The error type `E` is automatically inferred from the `parseError` return type. You don't need to specify it explicitly — TypeScript will determine the exact error shape from your mapper function.
 {% /callout %}
+
+---
+
+## Error normalization
+
+When no `parseError` is provided, all non-`Error` thrown values are automatically normalized to `Error` instances. This makes the default `SafeResult<T, Error>` return type truthful:
+
+```ts
+const [, error] = safe.sync(() => { throw 'string error' })
+// error is Error with message "string error" (not a raw string)
+// error.cause preserves the original thrown value
+
+const [, error2] = safe.sync(() => { throw new TypeError('bad type') })
+// error2 is the original TypeError — Error instances pass through unchanged
+```
+
+---
+
+## parseError safety
+
+The `parseError` function is wrapped in try/catch. If it throws:
+
+1. The error is reported via `onHookError` with hookName `'parseError'`
+2. `defaultError` is returned as the error result (if provided)
+3. Otherwise, the original caught error is normalized to an `Error` instance
+
+```ts
+const [, error] = safe.sync(
+  () => { throw new Error('original') },
+  (e) => { throw new Error('parseError crashed') },
+  {
+    defaultError: { code: 'FALLBACK', message: 'default' },
+    onHookError: (err, hookName) => {
+      // hookName === 'parseError'
+    },
+  }
+)
+// error is { code: 'FALLBACK', message: 'default' }
+```
+
+---
+
+## NonFalsy constraint
+
+The `parseError` return type uses `NonFalsy<E>` to prevent returning falsy values (`null`, `undefined`, `false`, `0`, `''`) that would break `if (error)` truthiness checks:
+
+```ts
+// Compile error — null is falsy
+safe.sync(() => risky(), (e) => null)
+
+// Compile error — null member stripped from union
+safe.sync(() => risky(), (e): string | null => e?.message ?? null)
+
+// OK — string is always truthy (non-empty enforced by your logic)
+safe.sync(() => risky(), (e) => String(e))
+```

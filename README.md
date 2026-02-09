@@ -97,8 +97,8 @@ src/
     ├── types.ts          # Type definitions (SafeResult, SafeHooks, SafeAsyncHooks, RetryConfig, TimeoutError, etc.)
     ├── safe.ts           # Core functions (sync, async, wrap, wrapAsync, all, allSettled) with retry and timeout support
     ├── createSafe.ts     # Factory function for pre-configured instances
-    ├── safe.test.ts      # Tests for core functions (280 tests)
-    └── createSafe.test.ts # Tests for factory function (164 tests)
+    ├── safe.test.ts      # Tests for core functions (345 tests)
+    └── createSafe.test.ts # Tests for factory function (180 tests)
 ```
 
 | File                                    | Description                                                                                                                      |
@@ -121,8 +121,8 @@ Executes a synchronous function and returns a `SafeResult` tuple.
 ```typescript
 safe.sync<T>(fn: () => T): SafeResult<T, Error>
 safe.sync<T>(fn: () => T, hooks: SafeHooks<T, Error, []>): SafeResult<T, Error>
-safe.sync<T, E>(fn: () => T, parseError: (e: unknown) => E): SafeResult<T, E>
-safe.sync<T, E>(fn: () => T, parseError: (e: unknown) => E, hooks: SafeHooks<T, E, []>): SafeResult<T, E>
+safe.sync<T, E>(fn: () => T, parseError: (e: unknown) => NonFalsy<E>): SafeResult<T, E>
+safe.sync<T, E>(fn: () => T, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeHooks<T, E, []> & { defaultError: E }): SafeResult<T, E>
 ```
 
 **Examples:**
@@ -181,8 +181,8 @@ Executes an asynchronous function and returns a `Promise<SafeResult>` tuple. **S
 ```typescript
 safe.async<T>(fn: () => Promise<T>): Promise<SafeResult<T, Error>>
 safe.async<T>(fn: () => Promise<T>, hooks: SafeAsyncHooks<T, Error, []>): Promise<SafeResult<T, Error>>
-safe.async<T, E>(fn: () => Promise<T>, parseError: (e: unknown) => E): Promise<SafeResult<T, E>>
-safe.async<T, E>(fn: () => Promise<T>, parseError: (e: unknown) => E, hooks: SafeAsyncHooks<T, E, []>): Promise<SafeResult<T, E>>
+safe.async<T, E>(fn: () => Promise<T>, parseError: (e: unknown) => NonFalsy<E>): Promise<SafeResult<T, E>>
+safe.async<T, E>(fn: () => Promise<T>, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeAsyncHooks<T, E, []> & { defaultError: E }): Promise<SafeResult<T, E>>
 ```
 
 **Examples:**
@@ -258,8 +258,8 @@ Wraps a synchronous function to return `SafeResult` instead of throwing. **Autom
 ```typescript
 safe.wrap<TArgs, T>(fn: (...args: TArgs) => T): (...args: TArgs) => SafeResult<T, Error>
 safe.wrap<TArgs, T>(fn: (...args: TArgs) => T, hooks: SafeHooks<T, Error, TArgs>): (...args: TArgs) => SafeResult<T, Error>
-safe.wrap<TArgs, T, E>(fn: (...args: TArgs) => T, parseError: (e: unknown) => E): (...args: TArgs) => SafeResult<T, E>
-safe.wrap<TArgs, T, E>(fn: (...args: TArgs) => T, parseError: (e: unknown) => E, hooks: SafeHooks<T, E, TArgs>): (...args: TArgs) => SafeResult<T, E>
+safe.wrap<TArgs, T, E>(fn: (...args: TArgs) => T, parseError: (e: unknown) => NonFalsy<E>): (...args: TArgs) => SafeResult<T, E>
+safe.wrap<TArgs, T, E>(fn: (...args: TArgs) => T, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeHooks<T, E, TArgs> & { defaultError: E }): (...args: TArgs) => SafeResult<T, E>
 ```
 
 **Examples:**
@@ -349,8 +349,8 @@ Wraps an asynchronous function to return `Promise<SafeResult>` instead of throwi
 ```typescript
 safe.wrapAsync<TArgs, T>(fn: (...args: TArgs) => Promise<T>): (...args: TArgs) => Promise<SafeResult<T, Error>>
 safe.wrapAsync<TArgs, T>(fn: (...args: TArgs) => Promise<T>, hooks: SafeAsyncHooks<T, Error, TArgs>): (...args: TArgs) => Promise<SafeResult<T, Error>>
-safe.wrapAsync<TArgs, T, E>(fn: (...args: TArgs) => Promise<T>, parseError: (e: unknown) => E): (...args: TArgs) => Promise<SafeResult<T, E>>
-safe.wrapAsync<TArgs, T, E>(fn: (...args: TArgs) => Promise<T>, parseError: (e: unknown) => E, hooks: SafeAsyncHooks<T, E, TArgs>): (...args: TArgs) => Promise<SafeResult<T, E>>
+safe.wrapAsync<TArgs, T, E>(fn: (...args: TArgs) => Promise<T>, parseError: (e: unknown) => NonFalsy<E>): (...args: TArgs) => Promise<SafeResult<T, E>>
+safe.wrapAsync<TArgs, T, E>(fn: (...args: TArgs) => Promise<T>, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeAsyncHooks<T, E, TArgs> & { defaultError: E }): (...args: TArgs) => Promise<SafeResult<T, E>>
 ```
 
 **Examples:**
@@ -507,7 +507,7 @@ const [data, error] = await safe.all({
 })
 
 // 4. With createSafe instance
-const appSafe = createSafe({ parseError: (e) => toAppError(e) })
+const appSafe = createSafe({ parseError: (e) => toAppError(e), defaultError: toAppError(new Error('unknown')) })
 
 const [data, error] = await appSafe.all({
   user: appSafe.async(() => fetchUser(userId)),
@@ -569,7 +569,7 @@ const [aValue, aError] = results.a // [42, null]
 const [bValue, bError] = results.b // [null, Error]
 
 // 4. With createSafe instance
-const appSafe = createSafe({ parseError: (e) => toAppError(e) })
+const appSafe = createSafe({ parseError: (e) => toAppError(e), defaultError: toAppError(new Error('unknown')) })
 
 const results = await appSafe.allSettled({
   user: appSafe.async(() => fetchUser(userId)),
@@ -626,6 +626,11 @@ const appSafe = createSafe({
     message: e instanceof Error ? e.message : 'An unknown error occurred',
     timestamp: new Date(),
   }),
+  defaultError: {
+    code: 'UNKNOWN_ERROR',
+    message: 'An unknown error occurred',
+    timestamp: new Date(),
+  },
 })
 
 // All methods now return AppError on failure - no need to pass parseError each time
@@ -646,6 +651,11 @@ const loggingSafe = createSafe({
     message: e instanceof Error ? e.message : String(e),
     timestamp: new Date(),
   }),
+  defaultError: {
+    code: 'ERROR',
+    message: 'An unknown error occurred',
+    timestamp: new Date(),
+  },
   onSuccess: (result) => {
     console.log('Operation succeeded:', result)
     analytics.track('operation_success')
@@ -680,6 +690,7 @@ const apiSafe = createSafe({
     status: 500,
     message: e instanceof Error ? e.message : 'Request failed',
   }),
+  defaultError: { type: 'API_ERROR' as const, status: 500, message: 'Request failed' },
   onError: (error) => metrics.increment('api_error', { type: error.type }),
 })
 
@@ -700,6 +711,7 @@ const dbSafe = createSafe({
     query: 'unknown',
     message: e instanceof Error ? e.message : String(e),
   }),
+  defaultError: { type: 'DB_ERROR' as const, query: 'unknown', message: 'Database error' },
 })
 
 const authSafe = createSafe({
@@ -708,6 +720,7 @@ const authSafe = createSafe({
     code: e instanceof TokenExpiredError ? 'EXPIRED' : 'INVALID',
     message: e instanceof Error ? e.message : 'Authentication failed',
   }),
+  defaultError: { type: 'AUTH_ERROR' as const, code: 'INVALID', message: 'Authentication failed' },
 })
 
 // Each instance has its own error type
@@ -727,6 +740,7 @@ When both default hooks (from config) and per-call hooks are provided, they exec
 ```typescript
 const appSafe = createSafe({
   parseError: (e) => String(e),
+  defaultError: 'unknown error',
   onSuccess: () => console.log('1. Default hook'),
 })
 
@@ -750,6 +764,7 @@ const appSafe = createSafe({
     code: 'ERR',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { code: 'ERR', message: 'Unknown' },
 })
 
 // Per-call hooks receive the correctly typed error
@@ -899,6 +914,7 @@ const apiSafe = createSafe({
     code: 'API_ERROR',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { code: 'API_ERROR', message: 'Unknown' },
   retry: {
     times: 3,
     waitBefore: (attempt) => attempt * 1000, // 1s, 2s, 3s
@@ -1105,6 +1121,7 @@ const apiSafe = createSafe({
     code: e instanceof TimeoutError ? 'TIMEOUT' : 'API_ERROR',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { code: 'API_ERROR', message: 'Unknown' },
   abortAfter: 10000, // Default 10s timeout for all async operations
 })
 
@@ -1157,6 +1174,7 @@ const apiSafe = createSafe({
     type: e instanceof TimeoutError ? 'timeout' : 'error',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { type: 'error', message: 'Unknown' },
   abortAfter: 5000,
   retry: { times: 2 },
   onRetry: (error, attempt) => {
@@ -1279,6 +1297,7 @@ type SafeHooks<T, E, TContext extends unknown[] = [], TOut = T> = {
   onError?: (error: E, context: TContext) => void
   onSettled?: (result: TOut | null, error: E | null, context: TContext) => void
   onHookError?: (error: unknown, hookName: string) => void
+  defaultError?: E
 }
 ```
 
@@ -1290,7 +1309,8 @@ Lifecycle hooks and result transformation:
 - `TOut` - The transformed result type (defaults to `T` when `parseResult` is not provided)
 - `parseResult` - Optional function that transforms the successful result from type `T` to type `TOut`
 - `onSettled` - Optional hook called after either success or error
-- `onHookError` - Optional callback invoked when any hook throws. Receives the thrown error and the hook name (e.g. `'onSuccess'`, `'onError'`). If not provided, hook errors are silently swallowed. If `onHookError` itself throws, that error is also swallowed.
+- `onHookError` - Optional callback invoked when any hook throws. Receives the thrown error and the hook name (e.g. `'onSuccess'`, `'onError'`, `'parseError'`). If not provided, hook errors are silently swallowed. If `onHookError` itself throws, that error is also swallowed.
+- `defaultError` - Optional fallback error value returned when `parseError` throws
 
 ### SafeAsyncHooks
 
@@ -1328,6 +1348,17 @@ Configuration for automatic retry:
 - `times` - Number of retry attempts. Total attempts = `times + 1` (initial + retries)
 - `waitBefore` - Optional function that returns milliseconds to wait before each retry. Receives 1-indexed attempt number.
 
+### NonFalsy
+
+```typescript
+type NonFalsy<E> = E extends Falsy ? never : E
+```
+
+A utility type that strips falsy members (`false`, `0`, `''`, `null`, `undefined`, `0n`, `void`) from `E`. Used as the return type constraint for `parseError` to prevent returning falsy error values that would break `if (error)` checks.
+
+- For union types like `string | null`, the falsy member (`null`) is stripped — `parseError` must return `string`
+- For purely falsy types (e.g. `null`, `false`), the result is `never`, making the `parseError` return type unsatisfiable (compile error)
+
 ### TimeoutError
 
 ```typescript
@@ -1349,7 +1380,8 @@ Error class thrown when an operation exceeds its `abortAfter` timeout:
 
 ```typescript
 type CreateSafeConfig<E, TResult = never> = {
-  parseError: (e: unknown) => E
+  parseError: (e: unknown) => NonFalsy<E>
+  defaultError: E
   parseResult?: (result: unknown) => TResult
   onSuccess?: (result: unknown) => void
   onError?: (error: E) => void
@@ -1363,7 +1395,8 @@ type CreateSafeConfig<E, TResult = never> = {
 
 Configuration for creating a pre-configured safe instance:
 
-- `parseError` - Required function that transforms caught errors to type `E`
+- `parseError` - Required function that transforms caught errors to type `E`. Uses `NonFalsy<E>` to prevent falsy error values. If `parseError` throws, the error is caught, reported via `onHookError('parseError')`, and `defaultError` is returned as the error result
+- `defaultError` - Required fallback error value returned when `parseError` throws
 - `parseResult` - Optional function that transforms successful results. When provided, `TResult` becomes the default result type for all methods
 - `onSuccess` - Optional default hook called on every successful operation (result is `unknown` since `T` varies per call)
 - `onError` - Optional default hook called on every error (receives the mapped error type `E`)
@@ -1523,6 +1556,7 @@ const validatedSafe = createSafe({
     code: 'ERROR',
     message: e instanceof Error ? e.message : String(e),
   }),
+  defaultError: { code: 'ERROR', message: 'Unknown error' },
   parseResult: (result) => schema.parse(result),
 })
 
@@ -1543,6 +1577,48 @@ const [raw, error2] = validatedSafe.sync(() => fetchConfig(), {
 4. `onSettled` receives the **transformed** result
 
 If `parseResult` throws, the error is caught and processed through `parseError` (or goes through retry logic for async operations).
+
+---
+
+<h2 id="error-normalization">Error Normalization</h2>
+
+When no `parseError` is provided, all non-`Error` thrown values are automatically normalized to `Error` instances. This makes the default `SafeResult<T, Error>` return type truthful:
+
+```typescript
+// Without parseError: non-Error throws become Error instances
+const [, error] = safe.sync(() => { throw 'string error' })
+// error is Error with message "string error" (not a raw string)
+// error.cause preserves the original thrown value
+
+const [, error2] = safe.sync(() => { throw 42 })
+// error2 is Error with message "42"
+
+// Error instances pass through unchanged
+const [, error3] = safe.sync(() => { throw new TypeError('bad type') })
+// error3 is the original TypeError
+```
+
+### parseError safety
+
+The `parseError` function is wrapped in try/catch. If it throws, the error is caught and:
+
+1. Reported via `onHookError` with hookName `'parseError'`
+2. Falls back to `defaultError` if provided
+3. Otherwise falls back to `toError(e)` — the original error normalized to an `Error` instance
+
+```typescript
+const [, error] = safe.sync(
+  () => { throw new Error('original') },
+  (e) => { throw new Error('parseError crashed') }, // broken parseError
+  {
+    defaultError: { code: 'FALLBACK', message: 'default' },
+    onHookError: (err, hookName) => {
+      // hookName === 'parseError', err === Error('parseError crashed')
+    },
+  }
+)
+// error is { code: 'FALLBACK', message: 'default' }
+```
 
 ---
 
@@ -1906,6 +1982,11 @@ export const appSafe = createSafe({
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     }
   },
+  defaultError: {
+    code: 'UNKNOWN_ERROR',
+    message: 'An unknown error occurred',
+    timestamp: new Date(),
+  },
   onSuccess: (result) => {
     // Optional: track success metrics
     metrics.increment('operation.success')
@@ -1983,6 +2064,7 @@ export const apiSafe = createSafe({
       endpoint: '',
     }
   },
+  defaultError: { type: 'UNKNOWN', statusCode: 500, message: 'Unknown error', endpoint: '' },
   onSuccess: (result) => {
     logger.debug('API request succeeded', { result })
   },
@@ -2100,6 +2182,7 @@ export const dbSafe = createSafe({
 
     return { code: 'QUERY', message }
   },
+  defaultError: { code: 'UNKNOWN', message: 'Database error' },
   onSuccess: () => {
     metrics.increment('db.query.success')
   },
@@ -2236,6 +2319,7 @@ export const stripeSafe = createSafe({
       retryable: false,
     }
   },
+  defaultError: { code: 'API_ERROR', message: 'Unknown payment error', retryable: false },
   onError: (error) => {
     logger.error('Stripe operation failed', {
       code: error.code,
@@ -2342,6 +2426,12 @@ function createTenantSafe(tenantId: string): SafeInstance<TenantError> {
       tenantId,
       timestamp: new Date(),
     }),
+    defaultError: {
+      code: 'UNKNOWN',
+      message: 'Unknown error',
+      tenantId,
+      timestamp: new Date(),
+    },
     onSuccess: () => {
       metrics.increment('tenant.operation.success', { tenantId })
     },
@@ -2548,7 +2638,7 @@ async function processOrder(orderId: string) {
 | [src/safe/safe.ts](src/safe/safe.ts)                       | Core functions (`sync`, `async`, `wrap`, `wrapAsync`, `all`, `allSettled`) with retry and timeout support                         |
 | [src/safe/createSafe.ts](src/safe/createSafe.ts)           | Factory function for pre-configured instances                                                                                     |
 | [src/safe/index.ts](src/safe/index.ts)                     | Barrel exports                                                                                                                    |
-| [src/safe/safe.test.ts](src/safe/safe.test.ts)             | Tests for core functions (280 tests)                                                                                              |
-| [src/safe/createSafe.test.ts](src/safe/createSafe.test.ts) | Tests for factory function (164 tests)                                                                                            |
+| [src/safe/safe.test.ts](src/safe/safe.test.ts)             | Tests for core functions (345 tests)                                                                                              |
+| [src/safe/createSafe.test.ts](src/safe/createSafe.test.ts) | Tests for factory function (180 tests)                                                                                            |
 
-**Total: 444 tests**
+**Total: 525 tests**

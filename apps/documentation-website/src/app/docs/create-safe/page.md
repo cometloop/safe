@@ -22,7 +22,8 @@ function createSafe<E, TResult = never>(
 ): SafeInstance<E, TResult>
 
 type CreateSafeConfig<E, TResult = never> = {
-  parseError: (e: unknown) => E            // Required: transforms caught errors
+  parseError: (e: unknown) => NonFalsy<E>  // Required: transforms caught errors
+  defaultError: E                          // Required: fallback when parseError throws
   parseResult?: (result: unknown) => TResult // Optional: transforms successful results
   onSuccess?: (result: unknown) => void    // Optional: called on every success
   onError?: (error: E) => void             // Optional: called on every error
@@ -52,6 +53,11 @@ const appSafe = createSafe({
     message: e instanceof Error ? e.message : 'An unknown error occurred',
     timestamp: new Date(),
   }),
+  defaultError: {
+    code: 'UNKNOWN_ERROR',
+    message: 'An unknown error occurred',
+    timestamp: new Date(),
+  },
 })
 
 // All methods now return AppError on failure
@@ -79,6 +85,11 @@ const loggingSafe = createSafe({
     message: e instanceof Error ? e.message : String(e),
     timestamp: new Date(),
   }),
+  defaultError: {
+    code: 'ERROR',
+    message: 'An unknown error occurred',
+    timestamp: new Date(),
+  },
   onSuccess: (result) => {
     console.log('Operation succeeded:', result)
     analytics.track('operation_success')
@@ -123,6 +134,7 @@ const apiSafe = createSafe({
     status: 500,
     message: e instanceof Error ? e.message : 'Request failed',
   }),
+  defaultError: { type: 'API_ERROR' as const, status: 500, message: 'Request failed' },
   onError: (error) => metrics.increment('api_error', { type: error.type }),
 })
 
@@ -154,6 +166,7 @@ const validatedSafe = createSafe({
     code: 'ERROR',
     message: e instanceof Error ? e.message : String(e),
   }),
+  defaultError: { code: 'ERROR', message: 'Unknown error' },
   parseResult: (result) => schema.parse(result),
 })
 
@@ -183,6 +196,7 @@ const dbSafe = createSafe({
     query: 'unknown',
     message: e instanceof Error ? e.message : String(e),
   }),
+  defaultError: { type: 'DB_ERROR' as const, query: 'unknown', message: 'Database error' },
 })
 
 const authSafe = createSafe({
@@ -191,6 +205,7 @@ const authSafe = createSafe({
     code: e instanceof TokenExpiredError ? 'EXPIRED' : 'INVALID',
     message: e instanceof Error ? e.message : 'Authentication failed',
   }),
+  defaultError: { type: 'AUTH_ERROR' as const, code: 'INVALID', message: 'Authentication failed' },
 })
 
 // Each instance has its own error type
@@ -209,6 +224,7 @@ Set a factory-level `onHookError` to catch hook errors across all operations:
 ```ts
 const appSafe = createSafe({
   parseError: (e) => String(e),
+  defaultError: 'unknown error',
   onSuccess: (result) => {
     externalLogger.log(result) // might throw
   },
@@ -248,6 +264,7 @@ When both default hooks (from config) and per-call hooks are provided:
 ```ts
 const appSafe = createSafe({
   parseError: (e) => String(e),
+  defaultError: 'unknown error',
   onSuccess: () => console.log('1. Default hook'),
 })
 
@@ -273,6 +290,7 @@ const appSafe = createSafe({
     code: 'ERR',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { code: 'ERR', message: 'Unknown' },
 })
 
 // Per-call hooks receive the correctly typed error

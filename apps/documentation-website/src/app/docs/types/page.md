@@ -28,6 +28,7 @@ type SafeHooks<T, E, TContext extends unknown[] = [], TOut = T> = {
   onError?: (error: E, context: TContext) => void
   onSettled?: (result: TOut | null, error: E | null, context: TContext) => void
   onHookError?: (error: unknown, hookName: string) => void
+  defaultError?: E
 }
 ```
 
@@ -40,6 +41,7 @@ Lifecycle hooks and result transformation:
 - `parseResult` — Optional function that transforms the successful result from type `T` to type `TOut`. See [Result transformation](/docs/result-transformation)
 - `onSettled` — Optional hook called after either success or error
 - `onHookError` — Optional callback invoked when any hook throws. Receives the thrown error and the hook name. See [Hooks](/docs/hooks#onhookerror)
+- `defaultError` — Optional fallback error value returned when `parseError` throws
 
 ---
 
@@ -83,6 +85,19 @@ Configuration for automatic retry:
 
 ---
 
+## NonFalsy
+
+```ts
+type NonFalsy<E> = E extends Falsy ? never : E
+```
+
+A utility type that strips falsy members (`false`, `0`, `''`, `null`, `undefined`, `0n`, `void`) from `E`. Used as the return type constraint for `parseError` to prevent returning falsy error values that would break `if (error)` truthiness checks.
+
+- For union types like `string | null`, the falsy member (`null`) is stripped — `parseError` must return `string`
+- For purely falsy types (e.g. `null`, `false`), the result is `never`, making the `parseError` return type unsatisfiable (compile error)
+
+---
+
 ## TimeoutError
 
 ```ts
@@ -106,7 +121,8 @@ Error class thrown when an operation exceeds its `abortAfter` timeout:
 
 ```ts
 type CreateSafeConfig<E, TResult = never> = {
-  parseError: (e: unknown) => E
+  parseError: (e: unknown) => NonFalsy<E>
+  defaultError: E
   parseResult?: (result: unknown) => TResult
   onSuccess?: (result: unknown) => void
   onError?: (error: E) => void
@@ -120,7 +136,8 @@ type CreateSafeConfig<E, TResult = never> = {
 
 Configuration for creating a pre-configured safe instance:
 
-- `parseError` — Required function that transforms caught errors to type `E`
+- `parseError` — Required function that transforms caught errors to type `E`. Uses `NonFalsy<E>` to prevent falsy return values. If `parseError` throws, the error is caught, reported via `onHookError('parseError')`, and `defaultError` is returned
+- `defaultError` — Required fallback error value returned when `parseError` throws
 - `parseResult` — Optional function that transforms successful results. When provided, `TResult` becomes the default result type for all methods. Per-call `parseResult` overrides the factory default
 - `onSuccess` — Optional default hook called on every successful operation (result is `unknown` since `T` varies per call)
 - `onError` — Optional default hook called on every error (receives the mapped error type `E`)
@@ -128,7 +145,7 @@ Configuration for creating a pre-configured safe instance:
 - `onRetry` — Optional default hook called before each retry for async operations
 - `retry` — Optional default retry configuration for async operations
 - `abortAfter` — Optional default timeout for all async operations in milliseconds
-- `onHookError` — Optional callback invoked when any hook throws. Per-call `onHookError` overrides the factory-level callback. See [Hooks](/docs/hooks#onhookerror)
+- `onHookError` — Optional callback invoked when any hook or `parseError` throws. Per-call `onHookError` overrides the factory-level callback. See [Hooks](/docs/hooks#onhookerror)
 
 ---
 

@@ -11,8 +11,8 @@ Executes a synchronous function and returns a `SafeResult` tuple. {% .lead %}
 ```ts
 safe.sync<T>(fn: () => T): SafeResult<T, Error>
 safe.sync<T>(fn: () => T, hooks: SafeHooks<T, Error, []>): SafeResult<T, Error>
-safe.sync<T, E>(fn: () => T, parseError: (e: unknown) => E): SafeResult<T, E>
-safe.sync<T, E>(fn: () => T, parseError: (e: unknown) => E, hooks: SafeHooks<T, E, []>): SafeResult<T, E>
+safe.sync<T, E>(fn: () => T, parseError: (e: unknown) => NonFalsy<E>): SafeResult<T, E>
+safe.sync<T, E>(fn: () => T, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeHooks<T, E, []> & { defaultError: E }): SafeResult<T, E>
 ```
 
 ---
@@ -30,6 +30,10 @@ console.log(result) // { name: "John" }
 ```
 
 On success, `result` contains the return value and `error` is `null`. On failure, `result` is `null` and `error` is the caught `Error`.
+
+{% callout title="Error normalization" type="note" %}
+When no `parseError` is provided, non-`Error` thrown values (strings, numbers, etc.) are automatically normalized to `Error` instances via `new Error(String(e))`. The original thrown value is preserved as `error.cause`. This ensures the default `SafeResult<T, Error>` type is always truthful.
+{% /callout %}
 
 ---
 

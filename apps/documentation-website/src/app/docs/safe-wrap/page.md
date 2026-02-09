@@ -11,9 +11,13 @@ Wraps a synchronous function to return `SafeResult` instead of throwing. Automat
 ```ts
 safe.wrap<TArgs, T>(fn: (...args: TArgs) => T): (...args: TArgs) => SafeResult<T, Error>
 safe.wrap<TArgs, T>(fn: (...args: TArgs) => T, hooks: SafeHooks<T, Error, TArgs>): (...args: TArgs) => SafeResult<T, Error>
-safe.wrap<TArgs, T, E>(fn: (...args: TArgs) => T, parseError: (e: unknown) => E): (...args: TArgs) => SafeResult<T, E>
-safe.wrap<TArgs, T, E>(fn: (...args: TArgs) => T, parseError: (e: unknown) => E, hooks: SafeHooks<T, E, TArgs>): (...args: TArgs) => SafeResult<T, E>
+safe.wrap<TArgs, T, E>(fn: (...args: TArgs) => T, parseError: (e: unknown) => NonFalsy<E>): (...args: TArgs) => SafeResult<T, E>
+safe.wrap<TArgs, T, E>(fn: (...args: TArgs) => T, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeHooks<T, E, TArgs> & { defaultError: E }): (...args: TArgs) => SafeResult<T, E>
 ```
+
+{% callout title="Error normalization" type="note" %}
+When no `parseError` is provided, non-`Error` thrown values are automatically normalized to `Error` instances via `new Error(String(e))`. The original thrown value is preserved as `error.cause`.
+{% /callout %}
 
 ---
 

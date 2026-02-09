@@ -197,7 +197,11 @@ const [data, error] = safe.sync(() => fetchData(), {
 The callback receives:
 
 - `error` — The value thrown by the hook (`unknown`)
-- `hookName` — Which hook threw: `'onSuccess'`, `'onError'`, `'onSettled'`, or `'onRetry'`
+- `hookName` — Which hook threw: `'onSuccess'`, `'onError'`, `'onSettled'`, `'onRetry'`, or `'parseError'`
+
+{% callout title="parseError safety" type="note" %}
+The `parseError` function is also wrapped in try/catch. If it throws, the error is reported via `onHookError` with hookName `'parseError'`, and the `defaultError` value is returned as the error result. If no `defaultError` is provided, the original caught error is normalized to an `Error` instance.
+{% /callout %}
 
 ### Safety guarantee
 
@@ -210,6 +214,7 @@ Set a factory-level `onHookError` to catch hook errors across all operations:
 ```ts
 const appSafe = createSafe({
   parseError: (e) => String(e),
+  defaultError: 'unknown error',
   onSuccess: (result) => {
     logger.log(result) // might throw
   },

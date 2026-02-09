@@ -1,6 +1,30 @@
 {
   "name": "@cometloop/safe",
   "version": "0.0.1",
+  "description": "Zero-dependency, type-safe error handling using a result tuple pattern for TypeScript",
+  "author": "cometloop",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cometloop/safe.git",
+    "directory": "packages/safe"
+  },
+  "homepage": "https://github.com/cometloop/safe#readme",
+  "bugs": {
+    "url": "https://github.com/cometloop/safe/issues"
+  },
+  "keywords": [
+    "error-handling",
+    "result",
+    "typescript",
+    "safe",
+    "tuple",
+    "try-catch",
+    "type-safe"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -29,7 +53,6 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage"
   },
-  "license": "MIT",
   "devDependencies": {
     "@core/eslint-config": "workspace:*",
     "@core/typescript-config": "workspace:*",
@@ -37,7 +60,7 @@
     "@vitest/ui": "^4.0.16",
     "eslint": "^8.57.0",
     "tsup": "^8.5.1",
-    "typescript": "5.5.4",
+    "typescript": "^5.5.4",
     "vitest": "^4.0.16"
   }
 }

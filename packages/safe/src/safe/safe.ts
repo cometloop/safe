@@ -1,4 +1,4 @@
-import type { SafeResult, SafeHooks, SafeAsyncHooks } from './types'
+import type { SafeResult, SafeHooks, SafeAsyncHooks, NonFalsy } from './types'
 import { TimeoutError, ok, err } from './types'
 
 // Valid keys for SafeHooks and SafeAsyncHooks.
@@ -11,20 +11,22 @@ const HOOK_KEY_MAP: Record<keyof SafeAsyncHooks<any, any, any>, true> = {
   onError: true,
   onSettled: true,
   onHookError: true,
+  defaultError: true,
   onRetry: true,
   retry: true,
   abortAfter: true,
 }
 const HOOK_KEYS: ReadonlySet<string> = new Set(Object.keys(HOOK_KEY_MAP))
 
-// Type guard to distinguish hooks object from parseError function
+// Type guard to distinguish hooks object from parseError function.
+// Requires at least one recognized key to avoid false positives on {}.
 const isHooks = <T, E, TContext extends unknown[]>(
   arg: unknown
-): arg is SafeHooks<T, E, TContext> =>
-  typeof arg === 'object' &&
-  arg !== null &&
-  !Array.isArray(arg) &&
-  Object.keys(arg).every(key => HOOK_KEYS.has(key))
+): arg is SafeHooks<T, E, TContext> => {
+  if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return false
+  const keys = Object.keys(arg)
+  return keys.length > 0 && keys.every(key => HOOK_KEYS.has(key))
+}
 
 // Safely call a hook, swallowing any errors it throws.
 // A logging hook throwing should never crash the application
@@ -45,26 +47,59 @@ const callHook = (
   }
 }
 
+// Normalize unknown thrown values to Error instances.
+// Makes the `Error` default type truthful when no parseError is provided.
+const toError = (e: unknown): Error => {
+  if (e instanceof Error) return e
+  const error = new Error(String(e))
+  ;(error as any).cause = e
+  return error
+}
+
+// Safely call parseError, falling back to defaultError or toError(e).
+// If parseError throws, the exception is reported via onHookError('parseError').
+const callParseError = <E>(
+  e: unknown,
+  parseError: ((e: unknown) => E) | undefined,
+  onHookError?: (error: unknown, hookName: string) => void,
+  defaultError?: E,
+): E => {
+  if (!parseError) return toError(e) as E
+  try {
+    return parseError(e)
+  } catch (parseErrorException) {
+    try {
+      onHookError?.(parseErrorException, 'parseError')
+    } catch {
+      // onHookError itself must never throw
+    }
+    return defaultError ?? (toError(e) as E)
+  }
+}
+
 // Helper for async delays
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms))
 
-// Helper to wrap a promise with timeout
+// Helper to wrap a promise with timeout.
+// Uses Promise.race + finally so the timer is always cleaned up,
+// regardless of which settlement path wins.
 const withTimeout = <T>(
   promise: Promise<T>,
   ms: number,
   controller: AbortController
 ): Promise<T> => {
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
+  let timeoutId: ReturnType<typeof setTimeout>
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
       controller.abort()
       reject(new TimeoutError(ms))
     }, ms)
+  })
 
-    promise
-      .then(resolve)
-      .catch(reject)
-      .finally(() => clearTimeout(timeoutId))
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId)
   })
 }
 
@@ -76,8 +111,9 @@ const withTimeout = <T>(
  *
  * @param fn - The synchronous function to execute.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
- *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
- *   the exception propagates uncaught past the safe boundary. Ensure it does not throw.
+ *   If `parseError` throws, the exception is caught and reported via `onHookError`
+ *   (hookName `'parseError'`). The `defaultError` value is returned if provided;
+ *   otherwise the raw caught error is normalized to an `Error` instance.
  * @param hooks - Optional hooks for side effects (`parseResult`, `onSuccess`, `onError`, `onSettled`).
  * @returns A `SafeResult<T, E>` tuple: `[value, null]` on success or `[null, error]` on failure.
  *
@@ -100,12 +136,12 @@ function safeSync<T, TOut = T>(
 ): SafeResult<TOut, Error>
 function safeSync<T, E>(
   fn: () => T,
-  parseError: (e: unknown) => E
+  parseError: (e: unknown) => NonFalsy<E>
 ): SafeResult<T, E>
 function safeSync<T, E, TOut = T>(
   fn: () => T,
-  parseError: (e: unknown) => E,
-  hooks: SafeHooks<T, E, [], TOut>
+  parseError: (e: unknown) => NonFalsy<E>,
+  hooks: SafeHooks<T, E, [], TOut> & { defaultError: E }
 ): SafeResult<TOut, E>
 function safeSync<T, E = Error, TOut = T>(
   fn: () => T,
@@ -134,7 +170,7 @@ function safeSync<T, E = Error, TOut = T>(
     callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
     return ok(result)
   } catch (e) {
-    const error = parseError ? parseError(e) : (e as E)
+    const error = callParseError(e, parseError, onHookError, resolvedHooks?.defaultError)
     callHook(() => resolvedHooks?.onError?.(error, context), onHookError, 'onError')
     callHook(() => resolvedHooks?.onSettled?.(null, error, context), onHookError, 'onSettled')
     return err(error)
@@ -149,8 +185,9 @@ function safeSync<T, E = Error, TOut = T>(
  *
  * @param fn - The async function to execute. Receives an optional `AbortSignal` when `abortAfter` is configured.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
- *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
- *   the exception propagates uncaught past the safe boundary. Ensure it does not throw.
+ *   If `parseError` throws, the exception is caught and reported via `onHookError`
+ *   (hookName `'parseError'`). The `defaultError` value is returned if provided;
+ *   otherwise the raw caught error is normalized to an `Error` instance.
  * @param hooks - Optional hooks including `retry`, `abortAfter`, `onRetry`, `parseResult`, `onSuccess`, `onError`, `onSettled`.
  * @returns A `Promise<SafeResult<T, E>>` tuple: `[value, null]` on success or `[null, error]` on failure.
  *
@@ -172,12 +209,12 @@ function safeAsync<T, TOut = T>(
 ): Promise<SafeResult<TOut, Error>>
 function safeAsync<T, E>(
   fn: (signal?: AbortSignal) => Promise<T>,
-  parseError: (e: unknown) => E
+  parseError: (e: unknown) => NonFalsy<E>
 ): Promise<SafeResult<T, E>>
 function safeAsync<T, E, TOut = T>(
   fn: (signal?: AbortSignal) => Promise<T>,
-  parseError: (e: unknown) => E,
-  hooks: SafeAsyncHooks<T, E, [], TOut>
+  parseError: (e: unknown) => NonFalsy<E>,
+  hooks: SafeAsyncHooks<T, E, [], TOut> & { defaultError: E }
 ): Promise<SafeResult<TOut, E>>
 async function safeAsync<T, E = Error, TOut = T>(
   fn: (signal?: AbortSignal) => Promise<T>,
@@ -220,7 +257,7 @@ async function safeAsync<T, E = Error, TOut = T>(
       callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
       return ok(result)
     } catch (e) {
-      lastError = parseError ? parseError(e) : (e as E)
+      lastError = callParseError(e, parseError, onHookError, resolvedHooks?.defaultError)
 
       // If not the last attempt, call onRetry and potentially wait
       if (attempt < maxAttempts) {
@@ -247,8 +284,9 @@ async function safeAsync<T, E = Error, TOut = T>(
  *
  * @param fn - The synchronous function to wrap.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
- *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
- *   the exception propagates uncaught past the safe boundary. Ensure it does not throw.
+ *   If `parseError` throws, the exception is caught and reported via `onHookError`
+ *   (hookName `'parseError'`). The `defaultError` value is returned if provided;
+ *   otherwise the raw caught error is normalized to an `Error` instance.
  * @param hooks - Optional hooks for side effects (`parseResult`, `onSuccess`, `onError`, `onSettled`). Hooks receive the original call arguments as context.
  * @returns A wrapped function `(...args) => SafeResult<T, E>`.
  *
@@ -273,12 +311,12 @@ function wrap<TArgs extends unknown[], T, TOut = T>(
 ): (...args: TArgs) => SafeResult<TOut, Error>
 function wrap<TArgs extends unknown[], T, E>(
   fn: (...args: TArgs) => T,
-  parseError: (e: unknown) => E
+  parseError: (e: unknown) => NonFalsy<E>
 ): (...args: TArgs) => SafeResult<T, E>
 function wrap<TArgs extends unknown[], T, E, TOut = T>(
   fn: (...args: TArgs) => T,
-  parseError: (e: unknown) => E,
-  hooks: SafeHooks<T, E, TArgs, TOut>
+  parseError: (e: unknown) => NonFalsy<E>,
+  hooks: SafeHooks<T, E, TArgs, TOut> & { defaultError: E }
 ): (...args: TArgs) => SafeResult<TOut, E>
 function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
   fn: (...args: TArgs) => T,
@@ -297,9 +335,9 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
 
   const onHookError = resolvedHooks?.onHookError
 
-  return (...args: TArgs) => {
+  return function (this: unknown, ...args: TArgs) {
     try {
-      const rawResult = fn(...args)
+      const rawResult = fn.call(this, ...args)
       const result = (resolvedHooks?.parseResult
         ? resolvedHooks.parseResult(rawResult)
         : rawResult) as TOut
@@ -307,7 +345,7 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
       callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
       return ok(result)
     } catch (e) {
-      const error = parseError ? parseError(e) : (e as E)
+      const error = callParseError(e, parseError, onHookError, resolvedHooks?.defaultError)
       callHook(() => resolvedHooks?.onError?.(error, args), onHookError, 'onError')
       callHook(() => resolvedHooks?.onSettled?.(null, error, args), onHookError, 'onSettled')
       return err(error)
@@ -340,8 +378,9 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
  *
  * @param fn - The async function to wrap.
  * @param parseError - Optional function to transform the caught error into a custom type `E`.
- *   Unlike hooks, `parseError` is **not** wrapped in a try/catch — if it throws,
- *   the exception propagates uncaught past the safe boundary. Ensure it does not throw.
+ *   If `parseError` throws, the exception is caught and reported via `onHookError`
+ *   (hookName `'parseError'`). The `defaultError` value is returned if provided;
+ *   otherwise the raw caught error is normalized to an `Error` instance.
  * @param hooks - Optional hooks including `retry`, `abortAfter`, `onRetry`, `parseResult`, `onSuccess`, `onError`, `onSettled`. Hooks receive the original call arguments as context.
  * @returns A wrapped function `(...args) => Promise<SafeResult<T, E>>`.
  *
@@ -368,12 +407,12 @@ function wrapAsync<TArgs extends unknown[], T, TOut = T>(
 ): (...args: TArgs) => Promise<SafeResult<TOut, Error>>
 function wrapAsync<TArgs extends unknown[], T, E>(
   fn: (...args: TArgs) => Promise<T>,
-  parseError: (e: unknown) => E
+  parseError: (e: unknown) => NonFalsy<E>
 ): (...args: TArgs) => Promise<SafeResult<T, E>>
 function wrapAsync<TArgs extends unknown[], T, E, TOut = T>(
   fn: (...args: TArgs) => Promise<T>,
-  parseError: (e: unknown) => E,
-  hooks: SafeAsyncHooks<T, E, TArgs, TOut>
+  parseError: (e: unknown) => NonFalsy<E>,
+  hooks: SafeAsyncHooks<T, E, TArgs, TOut> & { defaultError: E }
 ): (...args: TArgs) => Promise<SafeResult<TOut, E>>
 function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
   fn: (...args: TArgs) => Promise<T>,
@@ -394,7 +433,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
   const abortAfter = resolvedHooks?.abortAfter
   const onHookError = resolvedHooks?.onHookError
 
-  return async (...args: TArgs) => {
+  return async function (this: unknown, ...args: TArgs) {
     let lastError!: E
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -402,7 +441,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
       const controller = abortAfter !== undefined ? new AbortController() : undefined
 
       try {
-        let promise = fn(...args)
+        let promise = fn.call(this, ...args)
 
         // Wrap with timeout if configured
         if (abortAfter !== undefined && controller) {
@@ -417,7 +456,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
         callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
         return ok(result)
       } catch (e) {
-        lastError = parseError ? parseError(e) : (e as E)
+        lastError = callParseError(e, parseError, onHookError, resolvedHooks?.defaultError)
 
         // If not the last attempt, call onRetry and potentially wait
         if (attempt < maxAttempts) {
@@ -439,7 +478,8 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
 /**
  * Run multiple safe-wrapped async operations in parallel and return all values or the first error.
  *
- * Accepts an object map of `Promise<SafeResult>` entries. If all succeed, returns
+ * Short-circuits: returns immediately when any operation fails, without waiting
+ * for remaining operations to settle. If all succeed, returns
  * `ok({ key: value, ... })` with unwrapped values. If any fail, returns `err(firstError)`.
  *
  * @param promises - An object map of `Promise<SafeResult<T, E>>` entries.
@@ -456,7 +496,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
  * data.posts  // Post[]
  * ```
  */
-async function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
+function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
   promises: T
 ): Promise<
   SafeResult<
@@ -469,20 +509,47 @@ async function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
 
   const keys = Object.keys(promises)
   const values = Object.values(promises)
-  const results = await Promise.all(values)
 
-  for (const result of results) {
-    if (!result.ok) {
-      return err(result.error) as SafeResult<Values, Err>
+  if (values.length === 0) {
+    return Promise.resolve(ok({}) as SafeResult<Values, Err>)
+  }
+
+  // Race: resolve on first error OR when all succeed.
+  // Unlike Promise.all on never-rejecting promises, this returns
+  // to the caller immediately when any operation fails.
+  return new Promise<SafeResult<Values, Err>>((resolve) => {
+    const results = new Array<SafeResult<unknown, unknown>>(values.length)
+    let remaining = values.length
+    let done = false
+
+    for (let i = 0; i < values.length; i++) {
+      values[i].then(
+        (result) => {
+          if (done) return
+          if (!result.ok) {
+            done = true
+            resolve(err(result.error) as SafeResult<Values, Err>)
+            return
+          }
+          results[i] = result
+          remaining--
+          if (remaining === 0) {
+            done = true
+            const obj: Record<string, unknown> = {}
+            for (let j = 0; j < keys.length; j++) {
+              obj[keys[j]] = results[j].value
+            }
+            resolve(ok(obj) as SafeResult<Values, Err>)
+          }
+        },
+        (rejection) => {
+          if (done) return
+          done = true
+          resolve(err(toError(rejection)) as SafeResult<Values, Err>)
+        },
+      )
     }
-  }
-
-  const obj: Record<string, unknown> = {}
-  for (let i = 0; i < keys.length; i++) {
-    obj[keys[i]] = results[i].value
-  }
-
-  return ok(obj) as SafeResult<Values, Err>
+  })
 }
 
 /**
@@ -515,7 +582,13 @@ async function safeAllSettled<T extends Record<string, Promise<SafeResult<any, a
 
   const keys = Object.keys(promises)
   const values = Object.values(promises)
-  const results = await Promise.all(values)
+  const results = await Promise.all(
+    values.map((p) =>
+      p.catch((rejection): SafeResult<unknown, Error> =>
+        err(toError(rejection))
+      )
+    )
+  )
 
   const obj: Record<string, unknown> = {}
   for (let i = 0; i < keys.length; i++) {

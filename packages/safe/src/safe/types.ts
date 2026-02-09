@@ -1,3 +1,18 @@
+// Falsy types that would break the `if (error)` check pattern.
+// parseError returning any of these makes the error undetectable via truthiness.
+type Falsy = false | 0 | '' | null | undefined | 0n | void
+
+/**
+ * Strips falsy members from E via distributive conditional.
+ * When E is purely falsy (e.g. null, false, 0), the result is `never`,
+ * making the parseError return type unsatisfiable — a compile error.
+ *
+ * For union types like `string | null`, the falsy member (`null`) is
+ * stripped, so `parseError` must return `string` — which means
+ * `(e: unknown) => e?.message ?? null` correctly fails to compile.
+ */
+export type NonFalsy<E> = E extends Falsy ? never : E
+
 // Tagged result types: tuple intersection with discriminant properties
 export type SafeOk<T> = readonly [T, null] & {
   readonly ok: true
@@ -57,6 +72,8 @@ export type SafeHooks<T, E, TContext extends unknown[] = [], TOut = T> = {
   onError?: (error: E, context: TContext) => void
   onSettled?: (result: TOut | null, error: E | null, context: TContext) => void
   onHookError?: (error: unknown, hookName: string) => void
+  /** Fallback error value returned when `parseError` throws. */
+  defaultError?: E
 }
 
 // Extended hooks for async operations with retry and timeout support
@@ -75,14 +92,17 @@ export type CreateSafeConfig<E, TResult = never> = {
   /**
    * Error mapping function applied to all caught errors.
    *
-   * **Important:** Unlike hooks (`onError`, `onSuccess`, etc.), `parseError` is
-   * **not** wrapped in a try/catch. If this function throws, the exception will
-   * propagate uncaught past the safe boundary. This is intentional — `parseError`
-   * is part of the error-handling contract (its return value determines the `E` in
-   * `SafeResult<T, E>`), so there is no meaningful way to represent a failure
-   * inside `parseError` as a `SafeResult`. Ensure this function does not throw.
+   * If `parseError` throws, the exception is caught and reported via `onHookError`
+   * (hookName `'parseError'`). The `defaultError` value is returned as the error
+   * result; if `defaultError` is not provided, the raw caught error is normalized
+   * to an `Error` instance via `new Error(String(e))`.
    */
-  parseError: (e: unknown) => E
+  parseError: (e: unknown) => NonFalsy<E>
+  /**
+   * Fallback error value returned when `parseError` throws.
+   * Must be provided alongside `parseError` in `createSafe`.
+   */
+  defaultError: E
   /** Optional response transform applied to all successful results. Per-call parseResult overrides this. */
   parseResult?: (response: unknown) => TResult
   /** Optional default success hook (result is unknown since T varies per call) */
@@ -124,15 +144,25 @@ export type SafeInstance<E, TResult = never> = {
     fn: (...args: TArgs) => Promise<T>,
     hooks?: SafeAsyncHooks<T, E, TArgs, TOut>
   ) => (...args: TArgs) => Promise<SafeResult<TOut, E>>
-  all: <T extends Record<string, Promise<SafeResult<any, any>>>>(
-    promises: T
+  all: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(
+    fns: T
   ) => Promise<
     SafeResult<
-      { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never },
-      T[keyof T] extends Promise<SafeResult<any, infer EE>> ? EE : never
+      { [K in keyof T]: [TResult] extends [never]
+        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
+        : TResult
+      },
+      E
     >
   >
-  allSettled: <T extends Record<string, Promise<SafeResult<any, any>>>>(
-    promises: T
-  ) => Promise<{ [K in keyof T]: Awaited<T[K]> }>
+  allSettled: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(
+    fns: T
+  ) => Promise<{
+    [K in keyof T]: SafeResult<
+      [TResult] extends [never]
+        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
+        : TResult,
+      E
+    >
+  }>
 }

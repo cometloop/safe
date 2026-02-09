@@ -14,6 +14,7 @@ describe('createSafe', () => {
     it('creates a safe instance with all four methods', () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       expect(appSafe).toHaveProperty('sync')
@@ -33,6 +34,7 @@ describe('createSafe', () => {
           message: e instanceof Error ? e.message : 'Unknown error',
           originalError: e,
         }),
+        defaultError: { code: 'UNKNOWN_ERROR' as const, message: 'unknown error', originalError: null },
       })
 
       const [, error] = appSafe.sync(() => {
@@ -52,6 +54,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
         onSuccess,
         onError,
       })
@@ -62,6 +65,7 @@ describe('createSafe', () => {
     it('validates CreateSafeConfig type', () => {
       const config: CreateSafeConfig<{ code: string }> = {
         parseError: () => ({ code: 'ERR' }),
+        defaultError: { code: 'UNKNOWN' },
         onSuccess: (result) => {
           void result
         },
@@ -78,6 +82,7 @@ describe('createSafe', () => {
     it('validates SafeInstance type', () => {
       const instance: SafeInstance<string> = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       expect(instance.sync).toBeDefined()
@@ -91,6 +96,7 @@ describe('createSafe', () => {
     it('returns [result, null] on success', () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       const result = appSafe.sync(() => 42)
@@ -103,6 +109,7 @@ describe('createSafe', () => {
           type: 'error' as const,
           msg: e instanceof Error ? e.message : 'Unknown',
         }),
+        defaultError: { type: 'error' as const, msg: 'unknown error' },
       })
 
       const result = appSafe.sync(() => {
@@ -119,7 +126,7 @@ describe('createSafe', () => {
         original: e,
       }))
 
-      const appSafe = createSafe({ parseError })
+      const appSafe = createSafe({ parseError, defaultError: { mapped: true, original: null } })
 
       appSafe.sync(() => {
         throw new Error('test')
@@ -131,7 +138,7 @@ describe('createSafe', () => {
 
     it('does not call parseError on success', () => {
       const parseError = vi.fn((e: unknown) => String(e))
-      const appSafe = createSafe({ parseError })
+      const appSafe = createSafe({ parseError, defaultError: 'unknown error' })
 
       appSafe.sync(() => 'success')
 
@@ -141,6 +148,7 @@ describe('createSafe', () => {
     it('handles various return types', () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       expect(appSafe.sync(() => 'string')).toEqual(['string', null])
@@ -155,6 +163,7 @@ describe('createSafe', () => {
     it('handles various thrown types', () => {
       const appSafe = createSafe({
         parseError: (e) => ({ value: e }),
+        defaultError: { value: null },
       })
 
       expect(appSafe.sync(() => { throw new Error('err') })[1]).toEqual({ value: expect.any(Error) })
@@ -170,6 +179,7 @@ describe('createSafe', () => {
     it('returns [result, null] on success', async () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       const result = await appSafe.async(() => Promise.resolve(42))
@@ -182,6 +192,7 @@ describe('createSafe', () => {
           statusCode: 500,
           message: e instanceof Error ? e.message : 'Unknown',
         }),
+        defaultError: { statusCode: 0, message: 'unknown error' },
       })
 
       const result = await appSafe.async(() => Promise.reject(new Error('async fail')))
@@ -193,6 +204,7 @@ describe('createSafe', () => {
     it('returns [null, mappedError] when async function throws', async () => {
       const appSafe = createSafe({
         parseError: (e) => ({ thrown: true, error: e }),
+        defaultError: { thrown: true, error: null },
       })
 
       const result = await appSafe.async(async () => {
@@ -205,7 +217,7 @@ describe('createSafe', () => {
 
     it('always uses configured parseError', async () => {
       const parseError = vi.fn((e: unknown) => ({ mapped: e }))
-      const appSafe = createSafe({ parseError })
+      const appSafe = createSafe({ parseError, defaultError: { mapped: null } })
 
       await appSafe.async(() => Promise.reject('error'))
 
@@ -215,7 +227,7 @@ describe('createSafe', () => {
 
     it('does not call parseError on success', async () => {
       const parseError = vi.fn((e: unknown) => String(e))
-      const appSafe = createSafe({ parseError })
+      const appSafe = createSafe({ parseError, defaultError: 'unknown error' })
 
       await appSafe.async(() => Promise.resolve('success'))
 
@@ -225,6 +237,7 @@ describe('createSafe', () => {
     it('handles async functions', async () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       const result = await appSafe.async(async () => {
@@ -239,6 +252,7 @@ describe('createSafe', () => {
     it('returns a wrapped function', () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       const wrapped = appSafe.wrap(() => 42)
@@ -251,6 +265,7 @@ describe('createSafe', () => {
           error: true,
           msg: e instanceof Error ? e.message : String(e),
         }),
+        defaultError: { error: true, msg: 'unknown error' },
       })
 
       const divide = (a: number, b: number) => {
@@ -271,6 +286,7 @@ describe('createSafe', () => {
           type: 'parse_error' as const,
           message: e instanceof Error ? e.message : 'Parse failed',
         }),
+        defaultError: { type: 'parse_error' as const, message: 'unknown error' },
       })
 
       const safeJsonParse = appSafe.wrap(JSON.parse)
@@ -285,6 +301,7 @@ describe('createSafe', () => {
     it('can be called multiple times', () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       let counter = 0
@@ -300,6 +317,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => ({ code: 'VALIDATION_ERROR', message: String(e) }),
+        defaultError: { code: 'UNKNOWN', message: 'unknown error' },
       })
 
       const validateUser = (user: User) => {
@@ -320,6 +338,7 @@ describe('createSafe', () => {
     it('returns a wrapped async function', () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       const wrapped = appSafe.wrapAsync(() => Promise.resolve(42))
@@ -332,6 +351,7 @@ describe('createSafe', () => {
           code: 'FETCH_ERROR' as const,
           message: e instanceof Error ? e.message : 'Unknown',
         }),
+        defaultError: { code: 'FETCH_ERROR' as const, message: 'unknown error' },
       })
 
       const fetchUser = async (id: number) => {
@@ -352,6 +372,7 @@ describe('createSafe', () => {
           status: 400,
           error: e instanceof Error ? e.message : 'Unknown',
         }),
+        defaultError: { status: 0, error: 'unknown error' },
       })
 
       const postData = async (endpoint: string, body: Record<string, unknown>) => {
@@ -375,6 +396,7 @@ describe('createSafe', () => {
     it('can be called multiple times', async () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       let counter = 0
@@ -392,6 +414,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
         onSuccess: defaultOnSuccess,
       })
 
@@ -409,6 +432,7 @@ describe('createSafe', () => {
           code: 'ERR',
           message: e instanceof Error ? e.message : 'Unknown',
         }),
+        defaultError: { code: 'UNKNOWN', message: 'unknown error' },
         onError: defaultOnError,
       })
 
@@ -425,6 +449,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
         onSuccess: defaultOnSuccess,
       })
 
@@ -439,6 +464,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => ({ error: String(e) }),
+        defaultError: { error: 'unknown error' },
         onError: defaultOnError,
       })
 
@@ -453,6 +479,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
         onSuccess: defaultOnSuccess,
       })
 
@@ -467,6 +494,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => ({ msg: String(e) }),
+        defaultError: { msg: 'unknown error' },
         onError: defaultOnError,
       })
 
@@ -486,6 +514,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
         onSuccess: defaultOnSuccess,
       })
 
@@ -500,6 +529,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => ({ code: 'ERR', msg: String(e) }),
+        defaultError: { code: 'ERR', msg: 'unknown error' },
         onError: defaultOnError,
       })
 
@@ -518,6 +548,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
         onSuccess: defaultOnSuccess,
         onError: defaultOnError,
       })
@@ -534,6 +565,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
         onSuccess: defaultOnSuccess,
         onError: defaultOnError,
       })
@@ -554,6 +586,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       appSafe.sync(() => 42, { onSuccess, onError })
@@ -568,6 +601,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       await appSafe.async(() => Promise.resolve('done'), { onSuccess, onError })
@@ -582,6 +616,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       const safeDivide = appSafe.wrap((a: number, b: number) => a / b, { onSuccess, onError })
@@ -597,6 +632,7 @@ describe('createSafe', () => {
 
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       const safeFetch = appSafe.wrapAsync(async (id: number) => ({ id }), { onSuccess, onError })
@@ -609,6 +645,7 @@ describe('createSafe', () => {
     it('per-call onSuccess receives correctly typed result', () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
+        defaultError: 'unknown error',
       })
 
       appSafe.sync(() => ({ name: 'John', age: 30 }), {
@@ -627,6 +664,7 @@ describe('createSafe', () => {
           code: 'ERR' as const,
           message: e instanceof Error ? e.message : 'Unknown',
         }),
+        defaultError: { code: 'ERR' as const, message: 'unknown error' },
       })
 
       appSafe.sync(
@@ -652,6 +690,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -669,6 +708,7 @@ describe('createSafe', () => {
             code: 'ERR',
             message: e instanceof Error ? e.message : 'Unknown',
           }),
+          defaultError: { code: 'UNKNOWN', message: 'unknown error' },
           onSettled: defaultOnSettled,
         })
 
@@ -683,6 +723,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -697,6 +738,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => ({ error: String(e) }),
+          defaultError: { error: 'unknown error' },
           onSettled: defaultOnSettled,
         })
 
@@ -711,6 +753,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -725,6 +768,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => ({ msg: String(e) }),
+          defaultError: { msg: 'unknown error' },
           onSettled: defaultOnSettled,
         })
 
@@ -744,6 +788,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -758,6 +803,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => ({ code: 'ERR', msg: String(e) }),
+          defaultError: { code: 'ERR', msg: 'unknown error' },
           onSettled: defaultOnSettled,
         })
 
@@ -777,6 +823,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
         })
 
         appSafe.sync(() => 42, { onSettled })
@@ -789,6 +836,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
         })
 
         await appSafe.async(() => Promise.resolve('done'), { onSettled })
@@ -801,6 +849,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
         })
 
         const safeDivide = appSafe.wrap((a: number, b: number) => a / b, { onSettled })
@@ -814,6 +863,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
         })
 
         const safeFetch = appSafe.wrapAsync(async (id: number) => ({ id }), { onSettled })
@@ -831,6 +881,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -848,6 +899,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => ({ msg: String(e) }),
+          defaultError: { msg: 'unknown error' },
           onSettled: defaultOnSettled,
         })
 
@@ -867,6 +919,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -882,6 +935,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -897,6 +951,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -915,6 +970,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => ({ error: String(e) }),
+          defaultError: { error: 'unknown error' },
           onSettled: defaultOnSettled,
         })
 
@@ -936,6 +992,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -954,6 +1011,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => ({ code: 'ERR', msg: String(e) }),
+          defaultError: { code: 'ERR', msg: 'unknown error' },
           onSettled: defaultOnSettled,
         })
 
@@ -977,6 +1035,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSuccess: () => callOrder.push('onSuccess'),
           onError: () => callOrder.push('onError'),
           onSettled: () => callOrder.push('onSettled'),
@@ -992,6 +1051,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSuccess: () => callOrder.push('onSuccess'),
           onError: () => callOrder.push('onError'),
           onSettled: () => callOrder.push('onSettled'),
@@ -1007,6 +1067,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSuccess: () => callOrder.push('default-onSuccess'),
           onSettled: () => callOrder.push('default-onSettled'),
         })
@@ -1029,6 +1090,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onError: () => callOrder.push('default-onError'),
           onSettled: () => callOrder.push('default-onSettled'),
         })
@@ -1058,6 +1120,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           retry: { times: 2 },
           onRetry: defaultOnRetry,
           onSettled: defaultOnSettled,
@@ -1081,6 +1144,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           retry: { times: 3 },
           onSettled: defaultOnSettled,
         })
@@ -1098,6 +1162,7 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
+          defaultError: 'unknown error',
           onSettled: defaultOnSettled,
         })
 
@@ -1387,19 +1452,63 @@ describe('createSafe', () => {
   })
 
   describe('edge cases', () => {
-    it('handles parseError that throws', () => {
+    it('handles parseError that throws — returns defaultError as fallback', () => {
       const appSafe = createSafe({
         parseError: () => {
           throw new Error('parseError threw')
         },
+        defaultError: 'factory fallback',
       })
 
-      // When parseError throws, the error propagates
-      expect(() =>
-        appSafe.sync(() => {
-          throw new Error('original')
-        })
-      ).toThrow('parseError threw')
+      // When parseError throws, defaultError is returned instead of propagating
+      const result = appSafe.sync(() => {
+        throw new Error('original')
+      })
+      expect(result[0]).toBeNull()
+      expect(result[1]).toBe('factory fallback')
+    })
+
+    it('createSafe with defaultError returns it when parseError throws', () => {
+      const defaultErr = { code: 'DEFAULT' as const, message: 'fallback' }
+      const appSafe = createSafe({
+        parseError: () => { throw new Error('parseError broke') },
+        defaultError: defaultErr,
+      })
+
+      const result = appSafe.sync(() => { throw new Error('original') })
+      expect(result[0]).toBeNull()
+      expect(result[1]).toBe(defaultErr)
+    })
+
+    it('per-call defaultError overrides factory defaultError', () => {
+      const factoryDefault = { code: 'FACTORY' as const }
+      const perCallDefault = { code: 'PER_CALL' as const }
+
+      const appSafe = createSafe({
+        parseError: () => { throw new Error('parseError broke') },
+        defaultError: factoryDefault,
+      })
+
+      const result = appSafe.sync(
+        () => { throw new Error('original') },
+        { defaultError: perCallDefault as any },
+      )
+      expect(result[0]).toBeNull()
+      expect(result[1]).toBe(perCallDefault)
+    })
+
+    it('parseError throwing calls onHookError with hookName parseError via createSafe', () => {
+      const onHookError = vi.fn()
+      const parseErrorException = new Error('parseError broke')
+
+      const appSafe = createSafe({
+        parseError: () => { throw parseErrorException },
+        defaultError: 'fallback',
+        onHookError,
+      })
+
+      appSafe.sync(() => { throw new Error('original') })
+      expect(onHookError).toHaveBeenCalledWith(parseErrorException, 'parseError')
     })
 
     it('handles default onSuccess that throws (swallowed, success result returned)', () => {
@@ -1605,6 +1714,15 @@ describe('createSafe', () => {
         appSafe.wrapAsync(async (id: number) => ({ id }))
 
       expect(await wrapped(42)).toEqual([{ id: 42 }, null])
+    })
+
+    it('rejects falsy parseError return types at compile time', () => {
+      // @ts-expect-error — null is falsy, breaks if (error) idiom
+      createSafe({ parseError: () => null })
+      // @ts-expect-error — undefined is falsy
+      createSafe({ parseError: () => undefined })
+      // @ts-expect-error — false is falsy
+      createSafe({ parseError: () => false })
     })
   })
 
@@ -2541,8 +2659,8 @@ describe('createSafe', () => {
       })
 
       const [data, error] = await appSafe.all({
-        a: appSafe.async(() => Promise.resolve(1)),
-        b: appSafe.async(() => Promise.resolve('two')),
+        a: () => Promise.resolve(1),
+        b: () => Promise.resolve('two'),
       })
 
       expect(error).toBeNull()
@@ -2558,12 +2676,134 @@ describe('createSafe', () => {
       })
 
       const [data, error] = await appSafe.all({
-        a: appSafe.async(() => Promise.resolve(1)),
-        b: appSafe.async(() => Promise.reject(new Error('boom'))),
+        a: () => Promise.resolve(1),
+        b: () => Promise.reject(new Error('boom')),
       })
 
       expect(data).toBeNull()
       expect(error).toEqual({ code: 'ERR', message: 'boom' })
+    })
+
+    it('applies factory parseError to errors', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'CUSTOM' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+      })
+
+      const [, error] = await appSafe.all({
+        a: () => Promise.resolve(1),
+        b: () => Promise.reject(new Error('fail')),
+      })
+
+      expect(error).toEqual({ code: 'CUSTOM', message: 'fail' })
+    })
+
+    it('applies factory hooks to each operation', async () => {
+      const onSuccess = vi.fn()
+      const onError = vi.fn()
+
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+        onSuccess,
+        onError,
+      })
+
+      await appSafe.all({
+        a: () => Promise.resolve(1),
+        b: () => Promise.reject(new Error('boom')),
+      })
+
+      expect(onSuccess).toHaveBeenCalledWith(1)
+      expect(onError).toHaveBeenCalledWith('boom')
+    })
+
+    it('applies factory retry config to each operation', async () => {
+      let attempts = 0
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+        retry: { times: 2 },
+      })
+
+      const [data] = await appSafe.all({
+        a: () => {
+          attempts++
+          if (attempts < 3) return Promise.reject(new Error('not yet'))
+          return Promise.resolve('done')
+        },
+      })
+
+      expect(attempts).toBe(3)
+      expect(data).toEqual({ a: 'done' })
+    })
+
+    it('applies factory parseResult to each operation', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => String(e),
+        parseResult: (r) => ({ wrapped: r }),
+      })
+
+      const [data] = await appSafe.all({
+        a: () => Promise.resolve(1),
+        b: () => Promise.resolve('two'),
+      })
+
+      expect(data).toEqual({ a: { wrapped: 1 }, b: { wrapped: 'two' } })
+    })
+
+    it('short-circuits on first error without waiting for slower operations', async () => {
+      const slowFinished = vi.fn()
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+      })
+
+      const [data, error] = await appSafe.all({
+        fast: () => Promise.reject(new Error('fast fail')),
+        slow: () =>
+          new Promise<string>((resolve) => {
+            setTimeout(() => {
+              slowFinished()
+              resolve('done')
+            }, 5000)
+          }),
+      })
+
+      expect(error).toBe('fast fail')
+      expect(data).toBeNull()
+      expect(slowFinished).not.toHaveBeenCalled()
+    })
+
+    it('works with a single entry', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+      })
+
+      const [data, error] = await appSafe.all({
+        only: () => Promise.resolve('solo'),
+      })
+
+      expect(error).toBeNull()
+      expect(data).toEqual({ only: 'solo' })
+    })
+
+    it('parseResult throwing is caught by parseError in all()', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'PARSE_RESULT_ERROR' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+        parseResult: () => { throw new Error('parseResult exploded') },
+        defaultError: { code: 'PARSE_RESULT_ERROR' as const, message: 'default' },
+      })
+
+      const [data, error] = await appSafe.all({
+        a: () => Promise.resolve(1),
+        b: () => Promise.resolve(2),
+      })
+
+      expect(data).toBeNull()
+      expect(error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
     })
   })
 
@@ -2577,8 +2817,8 @@ describe('createSafe', () => {
       })
 
       const results = await appSafe.allSettled({
-        a: appSafe.async(() => Promise.resolve(1)),
-        b: appSafe.async(() => Promise.reject(new Error('fail'))),
+        a: () => Promise.resolve(1),
+        b: () => Promise.reject(new Error('fail')),
       })
 
       expect(results.a.ok).toBe(true)
@@ -2586,6 +2826,96 @@ describe('createSafe', () => {
 
       expect(results.b.ok).toBe(false)
       expect(results.b.error).toEqual({ code: 'ERR', message: 'fail' })
+    })
+
+    it('applies factory parseError to errors', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'CUSTOM' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+      })
+
+      const results = await appSafe.allSettled({
+        a: () => Promise.resolve(1),
+        b: () => Promise.reject(new Error('oops')),
+      })
+
+      expect(results.b.ok).toBe(false)
+      expect(results.b.error).toEqual({ code: 'CUSTOM', message: 'oops' })
+    })
+
+    it('applies factory hooks to each operation', async () => {
+      const onSuccess = vi.fn()
+      const onError = vi.fn()
+
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+        onSuccess,
+        onError,
+      })
+
+      await appSafe.allSettled({
+        a: () => Promise.resolve(1),
+        b: () => Promise.reject(new Error('boom')),
+      })
+
+      expect(onSuccess).toHaveBeenCalledWith(1)
+      expect(onError).toHaveBeenCalledWith('boom')
+    })
+
+    it('applies factory retry config to each operation', async () => {
+      let attempts = 0
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+        retry: { times: 2 },
+      })
+
+      const results = await appSafe.allSettled({
+        a: () => {
+          attempts++
+          if (attempts < 3) return Promise.reject(new Error('not yet'))
+          return Promise.resolve('done')
+        },
+      })
+
+      expect(attempts).toBe(3)
+      expect(results.a.ok).toBe(true)
+      expect(results.a.value).toBe('done')
+    })
+
+    it('works with a single entry', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+      })
+
+      const results = await appSafe.allSettled({
+        only: () => Promise.resolve('solo'),
+      })
+
+      expect(results.only.ok).toBe(true)
+      expect(results.only.value).toBe('solo')
+    })
+
+    it('parseResult throwing is caught by parseError in allSettled()', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'PARSE_RESULT_ERROR' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+        parseResult: () => { throw new Error('parseResult exploded') },
+        defaultError: { code: 'PARSE_RESULT_ERROR' as const, message: 'default' },
+      })
+
+      const results = await appSafe.allSettled({
+        a: () => Promise.resolve(1),
+        b: () => Promise.resolve(2),
+      })
+
+      expect(results.a.ok).toBe(false)
+      expect(results.a.error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
+      expect(results.b.ok).toBe(false)
+      expect(results.b.error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
     })
   })
 

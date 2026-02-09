@@ -52,8 +52,8 @@ src/
     ├── types.ts          # Type definitions
     ├── safe.ts           # Core functions (sync, async, wrap, wrapAsync)
     ├── createSafe.ts     # Factory function for pre-configured instances
-    ├── safe.test.ts      # Tests for core functions (145 tests)
-    └── createSafe.test.ts # Tests for factory function (92 tests)
+    ├── safe.test.ts      # Tests for core functions (345 tests)
+    └── createSafe.test.ts # Tests for factory function (180 tests)
 ```
 
 | File | Description |

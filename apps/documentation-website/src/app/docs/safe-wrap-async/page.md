@@ -11,9 +11,13 @@ Wraps an asynchronous function to return `Promise<SafeResult>` instead of throwi
 ```ts
 safe.wrapAsync<TArgs, T>(fn: (...args: TArgs) => Promise<T>): (...args: TArgs) => Promise<SafeResult<T, Error>>
 safe.wrapAsync<TArgs, T>(fn: (...args: TArgs) => Promise<T>, hooks: SafeAsyncHooks<T, Error, TArgs>): (...args: TArgs) => Promise<SafeResult<T, Error>>
-safe.wrapAsync<TArgs, T, E>(fn: (...args: TArgs) => Promise<T>, parseError: (e: unknown) => E): (...args: TArgs) => Promise<SafeResult<T, E>>
-safe.wrapAsync<TArgs, T, E>(fn: (...args: TArgs) => Promise<T>, parseError: (e: unknown) => E, hooks: SafeAsyncHooks<T, E, TArgs>): (...args: TArgs) => Promise<SafeResult<T, E>>
+safe.wrapAsync<TArgs, T, E>(fn: (...args: TArgs) => Promise<T>, parseError: (e: unknown) => NonFalsy<E>): (...args: TArgs) => Promise<SafeResult<T, E>>
+safe.wrapAsync<TArgs, T, E>(fn: (...args: TArgs) => Promise<T>, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeAsyncHooks<T, E, TArgs> & { defaultError: E }): (...args: TArgs) => Promise<SafeResult<T, E>>
 ```
+
+{% callout title="Error normalization" type="note" %}
+When no `parseError` is provided, non-`Error` thrown values are automatically normalized to `Error` instances via `new Error(String(e))`. The original thrown value is preserved as `error.cause`.
+{% /callout %}
 
 ---
 

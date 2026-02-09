@@ -80,50 +80,54 @@ describe('safe', () => {
         expect(result[1]).toBe(error)
       })
 
-      it('returns [null, error] when function throws a string', () => {
+      it('returns [null, Error] when function throws a string', () => {
         const result = safe.sync(() => {
           throw 'string error'
         })
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toBe('string error')
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('string error')
       })
 
-      it('returns [null, error] when function throws a number', () => {
+      it('returns [null, Error] when function throws a number', () => {
         const result = safe.sync(() => {
           throw 404
         })
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toBe(404)
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('404')
       })
 
-      it('returns [null, error] when function throws an object', () => {
+      it('returns [null, Error] when function throws an object', () => {
         const errorObj = { code: 'ERR_001', message: 'Something went wrong' }
         const result = safe.sync(() => {
           throw errorObj
         })
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toEqual(errorObj)
+        expect(result[1]).toBeInstanceOf(Error)
       })
 
-      it('returns [null, undefined] when function throws undefined', () => {
+      it('returns [null, Error] when function throws undefined', () => {
         const result = safe.sync(() => {
           throw undefined
         })
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toBeUndefined()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('undefined')
       })
 
-      it('returns [null, null] when function throws null', () => {
+      it('returns [null, Error] when function throws null', () => {
         const result = safe.sync(() => {
           throw null
         })
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('null')
       })
     })
 
@@ -212,6 +216,15 @@ describe('safe', () => {
 
         expect(result).toEqual([42, null])
       })
+
+      it('rejects falsy parseError return types at compile time', () => {
+        // @ts-expect-error — null is falsy
+        safe.sync(() => 42, () => null)
+        // @ts-expect-error — undefined is falsy
+        safe.sync(() => 42, () => undefined)
+        // @ts-expect-error — false is falsy
+        safe.sync(() => 42, () => false)
+      })
     })
   })
 
@@ -288,40 +301,44 @@ describe('safe', () => {
         expect(result[1]).toBe(error)
       })
 
-      it('returns [null, error] when promise rejects with string', async () => {
+      it('returns [null, Error] when promise rejects with string', async () => {
         const result = await safe.async(() => Promise.reject('string error'))
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toBe('string error')
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('string error')
       })
 
-      it('returns [null, error] when promise rejects with number', async () => {
+      it('returns [null, Error] when promise rejects with number', async () => {
         const result = await safe.async(() => Promise.reject(404))
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toBe(404)
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('404')
       })
 
-      it('returns [null, error] when promise rejects with object', async () => {
+      it('returns [null, Error] when promise rejects with object', async () => {
         const errorObj = { code: 'ERR_001', message: 'Something went wrong' }
         const result = await safe.async(() => Promise.reject(errorObj))
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toEqual(errorObj)
+        expect(result[1]).toBeInstanceOf(Error)
       })
 
-      it('returns [null, undefined] when promise rejects with undefined', async () => {
+      it('returns [null, Error] when promise rejects with undefined', async () => {
         const result = await safe.async(() => Promise.reject(undefined))
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toBeUndefined()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('undefined')
       })
 
-      it('returns [null, null] when promise rejects with null', async () => {
+      it('returns [null, Error] when promise rejects with null', async () => {
         const result = await safe.async(() => Promise.reject(null))
 
         expect(result[0]).toBeNull()
-        expect(result[1]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('null')
       })
 
       it('returns [null, Error] when async function throws', async () => {
@@ -524,12 +541,15 @@ describe('safe', () => {
         expect(wrapped()).toEqual([null, error])
       })
 
-      it('returns [null, error] for non-Error throws', () => {
+      it('returns [null, Error] for non-Error throws', () => {
         const wrapped = safe.wrap(() => {
           throw 'string error'
         })
 
-        expect(wrapped()[1]).toBe('string error')
+        const result = wrapped()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('string error')
+        expect(result[1]!.cause).toBe('string error')
       })
     })
 
@@ -603,6 +623,13 @@ describe('safe', () => {
         const result: SafeResult<number, string> = wrapped()
 
         expect(result).toEqual([42, null])
+      })
+
+      it('rejects falsy parseError return types at compile time', () => {
+        // @ts-expect-error — null is falsy
+        safe.wrap(() => 42, () => null)
+        // @ts-expect-error — undefined is falsy
+        safe.wrap(() => 42, () => undefined)
       })
     })
 
@@ -691,6 +718,50 @@ describe('safe', () => {
         expect(safeCreateUser('', 30, true)[0]).toBeNull()
       })
     })
+
+    describe('this binding preservation', () => {
+      it('forwards this to the wrapped function when called as a method', () => {
+        const obj = {
+          value: 42,
+          getValue: safe.wrap(function (this: { value: number }) {
+            return this.value
+          }),
+        }
+
+        const [result, error] = obj.getValue()
+        expect(error).toBeNull()
+        expect(result).toBe(42)
+      })
+
+      it('works with class instances', () => {
+        class Calculator {
+          constructor(public multiplier: number) {}
+          multiply = safe.wrap(function (this: Calculator, n: number) {
+            return n * this.multiplier
+          })
+        }
+
+        const calc = new Calculator(3)
+        const [result, error] = calc.multiply(7)
+        expect(error).toBeNull()
+        expect(result).toBe(21)
+      })
+
+      it('works with prototype methods assigned after wrap', () => {
+        class Service {
+          name = 'TestService'
+          getName!: () => SafeResult<string, Error>
+        }
+        Service.prototype.getName = safe.wrap(function (this: Service) {
+          return this.name
+        })
+
+        const svc = new Service()
+        const [result, error] = svc.getName()
+        expect(error).toBeNull()
+        expect(result).toBe('TestService')
+      })
+    })
   })
 
   describe('wrapAsync', () => {
@@ -773,11 +844,13 @@ describe('safe', () => {
         expect(await wrapped()).toEqual([null, error])
       })
 
-      it('returns [null, error] for non-Error rejections', async () => {
+      it('returns [null, Error] for non-Error rejections', async () => {
         const wrapped = safe.wrapAsync(() => Promise.reject('string error'))
         const result = await wrapped()
 
-        expect(result[1]).toBe('string error')
+        expect(result[1]).toBeInstanceOf(Error)
+        expect(result[1]!.message).toBe('string error')
+        expect(result[1]!.cause).toBe('string error')
       })
 
       it('returns [null, Error] when async function throws', async () => {
@@ -858,6 +931,13 @@ describe('safe', () => {
         const result: SafeResult<number, string> = await wrapped()
 
         expect(result).toEqual([42, null])
+      })
+
+      it('rejects falsy parseError return types at compile time', () => {
+        // @ts-expect-error — null is falsy
+        safe.wrapAsync(() => Promise.resolve(42), () => null)
+        // @ts-expect-error — false is falsy
+        safe.wrapAsync(() => Promise.resolve(42), () => false)
       })
     })
 
@@ -965,6 +1045,35 @@ describe('safe', () => {
         expect(await safeFetchUser()).toEqual([{ id: 42 }, null])
       })
     })
+
+    describe('this binding preservation', () => {
+      it('forwards this to the wrapped async function when called as a method', async () => {
+        const obj = {
+          value: 'async-hello',
+          getValue: safe.wrapAsync(async function (this: { value: string }) {
+            return this.value
+          }),
+        }
+
+        const [result, error] = await obj.getValue()
+        expect(error).toBeNull()
+        expect(result).toBe('async-hello')
+      })
+
+      it('works with class instances', async () => {
+        class ApiClient {
+          constructor(public baseUrl: string) {}
+          fetchUrl = safe.wrapAsync(async function (this: ApiClient, path: string) {
+            return `${this.baseUrl}${path}`
+          })
+        }
+
+        const client = new ApiClient('https://api.example.com')
+        const [result, error] = await client.fetchUrl('/users')
+        expect(error).toBeNull()
+        expect(result).toBe('https://api.example.com/users')
+      })
+    })
   })
 
   describe('hooks', () => {
@@ -1028,7 +1137,7 @@ describe('safe', () => {
         const onSuccess = vi.fn()
         const parseError = (e: unknown) => String(e)
 
-        safe.sync(() => 'result', parseError, { onSuccess })
+        safe.sync(() => 'result', parseError, { onSuccess, defaultError: 'unknown error' })
 
         expect(onSuccess).toHaveBeenCalledWith('result', [])
       })
@@ -1088,7 +1197,7 @@ describe('safe', () => {
         const onError = vi.fn()
         const parseError = (e: unknown) => `mapped: ${e}`
 
-        await safe.async(() => Promise.reject('error'), parseError, { onError })
+        await safe.async(() => Promise.reject('error'), parseError, { onError, defaultError: 'unknown error' })
 
         expect(onError).toHaveBeenCalledWith('mapped: error', [])
       })
@@ -1139,7 +1248,7 @@ describe('safe', () => {
           if (b === 0) throw new Error('Division by zero')
           return a / b
         }
-        const safeDivide = safe.wrap(divide, parseError, { onError })
+        const safeDivide = safe.wrap(divide, parseError, { onError, defaultError: { type: 'division_error', original: null } })
 
         safeDivide(10, 0)
 
@@ -1227,7 +1336,7 @@ describe('safe', () => {
           if (!Object.keys(body).length) throw new Error('Empty body')
           return { endpoint, body }
         }
-        const safePost = safe.wrapAsync(postData, parseError, { onError })
+        const safePost = safe.wrapAsync(postData, parseError, { onError, defaultError: { statusCode: 0, message: 'unknown error' } })
 
         await safePost('/api/users', {})
 
@@ -1884,6 +1993,7 @@ describe('safe', () => {
         const result = await safe.async(fn, parseError, {
           retry: { times: 1 },
           onRetry,
+          defaultError: { code: 'UNKNOWN', message: 'unknown' },
         })
 
         expect(result[1]).toEqual({ code: 'ERR', message: 'original' })
@@ -2007,6 +2117,34 @@ describe('safe', () => {
         vi.useRealTimers()
       })
 
+      it('waits before retry when waitBefore returns positive value', async () => {
+        vi.useFakeTimers()
+        let attempts = 0
+        const fn = vi.fn().mockImplementation(async () => {
+          attempts++
+          if (attempts < 2) throw new Error('fail')
+          return 'success'
+        })
+
+        const wrapped = safe.wrapAsync(fn, {
+          retry: { times: 2, waitBefore: () => 100 },
+        })
+
+        const promise = wrapped()
+
+        // First attempt should happen immediately
+        await vi.advanceTimersByTimeAsync(0)
+        expect(fn).toHaveBeenCalledTimes(1)
+
+        // Wait for the 100ms delay
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(fn).toHaveBeenCalledTimes(2)
+
+        vi.useRealTimers()
+      })
+
       it('works with parseError and retry', async () => {
         const fn = vi.fn().mockRejectedValue(new Error('original'))
         const parseError = vi.fn((e: unknown) => ({
@@ -2018,6 +2156,7 @@ describe('safe', () => {
         const wrapped = safe.wrapAsync(fn, parseError, {
           retry: { times: 1 },
           onRetry,
+          defaultError: { code: 'UNKNOWN', message: 'unknown' },
         })
 
         const result = await wrapped()
@@ -2218,7 +2357,7 @@ describe('safe', () => {
           message: e instanceof Error ? e.message : 'Unknown error',
         })
 
-        const promise = safe.async(fn, parseError, { abortAfter: 100 })
+        const promise = safe.async(fn, parseError, { abortAfter: 100, defaultError: { code: 'UNKNOWN', message: 'unknown error' } })
 
         await vi.advanceTimersByTimeAsync(100)
         const result = await promise
@@ -2781,6 +2920,7 @@ describe('safe', () => {
           abortAfter: 100,
           retry: { times: 1 },
           onRetry,
+          defaultError: { type: 'unknown', message: 'unknown' },
         })
 
         await vi.advanceTimersByTimeAsync(100)
@@ -3582,6 +3722,48 @@ describe('safe', () => {
       expect(result.value).toBeNull()
       expect(result.error).toBeInstanceOf(Error)
     })
+
+    it('short-circuits on first error without waiting for slower operations', async () => {
+      const slowFinished = vi.fn()
+
+      const [data, error] = await safe.all({
+        fast: safe.async(() => Promise.reject(new Error('fast fail'))),
+        slow: safe.async(
+          () =>
+            new Promise<string>((resolve) => {
+              setTimeout(() => {
+                slowFinished()
+                resolve('done')
+              }, 5000)
+            })
+        ),
+      })
+
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe('fast fail')
+      expect(data).toBeNull()
+      // The slow operation's callback should not have fired yet
+      expect(slowFinished).not.toHaveBeenCalled()
+    })
+
+    it('works with a single entry', async () => {
+      const [data, error] = await safe.all({
+        only: safe.async(() => Promise.resolve('solo')),
+      })
+
+      expect(error).toBeNull()
+      expect(data).toEqual({ only: 'solo' })
+    })
+
+    it('works with a single failing entry', async () => {
+      const [data, error] = await safe.all({
+        only: safe.async(() => Promise.reject(new Error('solo fail'))),
+      })
+
+      expect(data).toBeNull()
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe('solo fail')
+    })
   })
 
   describe('allSettled', () => {
@@ -3661,6 +3843,24 @@ describe('safe', () => {
       expect(results.item.ok).toBe(false)
       expect(results.item.error).toEqual({ code: 'CUSTOM', message: 'oops' })
     })
+
+    it('works with a single entry', async () => {
+      const results = await safe.allSettled({
+        only: safe.async(() => Promise.resolve('solo')),
+      })
+
+      expect(results.only.ok).toBe(true)
+      expect(results.only.value).toBe('solo')
+    })
+
+    it('works with a single failing entry', async () => {
+      const results = await safe.allSettled({
+        only: safe.async(() => Promise.reject(new Error('solo fail'))),
+      })
+
+      expect(results.only.ok).toBe(false)
+      expect((results.only.error as Error).message).toBe('solo fail')
+    })
   })
 
   describe('tagged result properties (.ok, .value, .error)', () => {
@@ -3690,20 +3890,21 @@ describe('safe', () => {
           throw null
         })
 
-        // Both are [null, null] at the tuple level
+        // success is [null, null] at the tuple level
         expect(success[0]).toBeNull()
         expect(success[1]).toBeNull()
+        // failure is [null, Error('null')] since toError normalizes non-Error values
         expect(failure[0]).toBeNull()
-        expect(failure[1]).toBeNull()
+        expect(failure[1]).toBeInstanceOf(Error)
 
-        // But discriminated by .ok
+        // Discriminated by .ok
         expect(success.ok).toBe(true)
         expect(failure.ok).toBe(false)
 
         expect(success.value).toBeNull()
         expect(success.error).toBeNull()
         expect(failure.value).toBeNull()
-        expect(failure.error).toBeNull()
+        expect(failure.error).toBeInstanceOf(Error)
       })
 
       it('tuple destructuring still works', () => {
@@ -4056,6 +4257,7 @@ describe('safe', () => {
           {
             onSuccess: () => { throw hookError },
             onHookError,
+            defaultError: 'unknown error',
           },
         )
 
@@ -4073,11 +4275,723 @@ describe('safe', () => {
           {
             onSuccess: () => { throw hookError },
             onHookError,
+            defaultError: 'unknown error',
           },
         )
 
         expect(result).toEqual([42, null])
         expect(onHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
+      })
+    })
+  })
+
+  describe('parseError safety', () => {
+    describe('sync', () => {
+      it('parseError throwing returns toError(e) as fallback (no defaultError)', () => {
+        const result = safe.sync(
+          () => { throw 'string error' },
+          () => { throw new Error('parseError broke') },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('string error')
+      })
+
+      it('parseError throwing returns defaultError when provided', () => {
+        const defaultErr = { code: 'FALLBACK' }
+        const result = safe.sync(
+          () => { throw new Error('original') },
+          () => { throw new Error('parseError broke') },
+          { defaultError: defaultErr, onHookError: () => {} },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(defaultErr)
+      })
+
+      it('parseError throwing calls onHookError with hookName parseError', () => {
+        const onHookError = vi.fn()
+        const parseErrorException = new Error('parseError broke')
+
+        safe.sync(
+          () => { throw new Error('original') },
+          () => { throw parseErrorException },
+          { onHookError, defaultError: { code: 'FALLBACK' } },
+        )
+
+        expect(onHookError).toHaveBeenCalledWith(parseErrorException, 'parseError')
+      })
+
+      it('hooks (onError, onSettled) still fire after parseError failure', () => {
+        const onError = vi.fn()
+        const onSettled = vi.fn()
+        const defaultErr = { code: 'FALLBACK' }
+
+        safe.sync(
+          () => { throw new Error('original') },
+          () => { throw new Error('parseError broke') },
+          { defaultError: defaultErr, onError, onSettled, onHookError: () => {} },
+        )
+
+        expect(onError).toHaveBeenCalledWith(defaultErr, [])
+        expect(onSettled).toHaveBeenCalledWith(null, defaultErr, [])
+      })
+
+      it('no parseError + non-Error thrown value returns Error wrapping the value', () => {
+        const result = safe.sync(() => { throw 42 })
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('42')
+        expect((result[1] as Error).cause).toBe(42)
+      })
+
+      it('no parseError + structured object preserves original via cause', () => {
+        const thrown = { code: 'ERR', details: [1, 2, 3] }
+        const result = safe.sync(() => { throw thrown })
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).cause).toBe(thrown)
+      })
+
+      it('no parseError + Error thrown value returns the Error as-is', () => {
+        const original = new Error('original')
+        const result = safe.sync(() => { throw original })
+
+        expect(result[1]).toBe(original)
+      })
+
+      it('onHookError throwing during parseError failure does not crash', () => {
+        const result = safe.sync(
+          () => { throw 'oops' },
+          () => { throw new Error('parseError broke') },
+          { onHookError: () => { throw new Error('onHookError also broke') } },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('oops')
+      })
+    })
+
+    describe('async', () => {
+      it('parseError throwing returns toError(e) as fallback (no defaultError)', async () => {
+        const result = await safe.async(
+          () => Promise.reject('string error'),
+          () => { throw new Error('parseError broke') },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('string error')
+      })
+
+      it('parseError throwing returns defaultError when provided', async () => {
+        const defaultErr = { code: 'FALLBACK' }
+        const result = await safe.async(
+          () => Promise.reject(new Error('original')),
+          () => { throw new Error('parseError broke') },
+          { defaultError: defaultErr, onHookError: () => {} },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(defaultErr)
+      })
+
+      it('parseError throwing during retry continues the loop', async () => {
+        let callCount = 0
+        const result = await safe.async(
+          () => { callCount++; return Promise.reject(new Error(`fail ${callCount}`)) },
+          () => { throw new Error('parseError broke') },
+          {
+            retry: { times: 2 },
+            defaultError: { code: 'FALLBACK' },
+            onHookError: () => {},
+          },
+        )
+
+        expect(callCount).toBe(3)
+        expect(result[0]).toBeNull()
+        expect(result[1]).toEqual({ code: 'FALLBACK' })
+      })
+
+      it('no parseError + non-Error thrown value returns Error wrapping the value', async () => {
+        const result = await safe.async(() => Promise.reject('async string'))
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('async string')
+        expect((result[1] as Error).cause).toBe('async string')
+      })
+
+      it('onHookError throwing during parseError failure does not crash', async () => {
+        const result = await safe.async(
+          () => Promise.reject('oops'),
+          () => { throw new Error('parseError broke') },
+          { onHookError: () => { throw new Error('onHookError also broke') } },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('oops')
+      })
+    })
+
+    describe('wrap', () => {
+      it('parseError throwing returns toError(e) as fallback (no defaultError)', () => {
+        const wrapped = safe.wrap(
+          () => { throw 'wrapped error' },
+          () => { throw new Error('parseError broke') },
+        )
+        const result = wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('wrapped error')
+      })
+
+      it('parseError throwing returns defaultError when provided', () => {
+        const defaultErr = { code: 'WRAP_FALLBACK' }
+        const wrapped = safe.wrap(
+          () => { throw new Error('original') },
+          () => { throw new Error('parseError broke') },
+          { defaultError: defaultErr, onHookError: () => {} },
+        )
+        const result = wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(defaultErr)
+      })
+
+      it('no parseError + non-Error thrown value returns Error wrapping the value', () => {
+        const wrapped = safe.wrap(() => { throw 'wrap string' })
+        const result = wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('wrap string')
+        expect((result[1] as Error).cause).toBe('wrap string')
+      })
+
+      it('onHookError throwing during parseError failure does not crash', () => {
+        const wrapped = safe.wrap(
+          () => { throw 'oops' },
+          () => { throw new Error('parseError broke') },
+          { onHookError: () => { throw new Error('onHookError also broke') } },
+        )
+        const result = wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('oops')
+      })
+    })
+
+    describe('wrapAsync', () => {
+      it('parseError throwing returns toError(e) as fallback (no defaultError)', async () => {
+        const wrapped = safe.wrapAsync(
+          () => Promise.reject('wrapped async error'),
+          () => { throw new Error('parseError broke') },
+        )
+        const result = await wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('wrapped async error')
+      })
+
+      it('parseError throwing returns defaultError when provided', async () => {
+        const defaultErr = { code: 'WRAP_ASYNC_FALLBACK' }
+        const wrapped = safe.wrapAsync(
+          () => Promise.reject(new Error('original')),
+          () => { throw new Error('parseError broke') },
+          { defaultError: defaultErr, onHookError: () => {} },
+        )
+        const result = await wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(defaultErr)
+      })
+
+      it('parseError throwing during retry continues the loop', async () => {
+        let callCount = 0
+        const wrapped = safe.wrapAsync(
+          () => { callCount++; return Promise.reject(new Error(`fail ${callCount}`)) },
+          () => { throw new Error('parseError broke') },
+          {
+            retry: { times: 2 },
+            defaultError: { code: 'WRAP_ASYNC_FALLBACK' },
+            onHookError: () => {},
+          },
+        )
+        const result = await wrapped()
+
+        expect(callCount).toBe(3)
+        expect(result[0]).toBeNull()
+        expect(result[1]).toEqual({ code: 'WRAP_ASYNC_FALLBACK' })
+      })
+
+      it('no parseError + non-Error thrown value returns Error wrapping the value', async () => {
+        const wrapped = safe.wrapAsync(() => Promise.reject(404))
+        const result = await wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('404')
+        expect((result[1] as Error).cause).toBe(404)
+      })
+
+      it('onHookError throwing during parseError failure does not crash', async () => {
+        const wrapped = safe.wrapAsync(
+          () => Promise.reject('oops'),
+          () => { throw new Error('parseError broke') },
+          { onHookError: () => { throw new Error('onHookError also broke') } },
+        )
+        const result = await wrapped()
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('oops')
+      })
+    })
+  })
+
+  describe('edge cases', () => {
+    describe('empty object {} is not treated as hooks', () => {
+      it('sync: treats {} as parseError (not hooks)', () => {
+        // {} should NOT be detected as a hooks object.
+        // When passed as the second arg it falls into the parseError branch,
+        // which is undefined-ish (not a function), so on success it is ignored.
+        const [value, error] = safe.sync(() => 42, {} as any)
+        expect(value).toBe(42)
+        expect(error).toBeNull()
+      })
+
+      it('async: treats {} as parseError (not hooks)', async () => {
+        const [value, error] = await safe.async(async () => 42, {} as any)
+        expect(value).toBe(42)
+        expect(error).toBeNull()
+      })
+
+      it('wrap: treats {} as parseError (not hooks)', () => {
+        const fn = safe.wrap((x: number) => x * 2, {} as any)
+        const [value, error] = fn(5)
+        expect(value).toBe(10)
+        expect(error).toBeNull()
+      })
+
+      it('wrapAsync: treats {} as parseError (not hooks)', async () => {
+        const fn = safe.wrapAsync(async (x: number) => x * 2, {} as any)
+        const [value, error] = await fn(5)
+        expect(value).toBe(10)
+        expect(error).toBeNull()
+      })
+    })
+
+    describe('abortAfter: 0', () => {
+      it('times out on next tick', async () => {
+        vi.useFakeTimers()
+
+        const resultPromise = safe.async(
+          () => new Promise<never>(() => {}),
+          { abortAfter: 0 },
+        )
+
+        await vi.advanceTimersByTimeAsync(0)
+
+        const [value, error] = await resultPromise
+        expect(value).toBeNull()
+        expect(error).toBeInstanceOf(TimeoutError)
+        expect((error as TimeoutError).message).toBe('Operation timed out after 0ms')
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('abortAfter: non-integer (1.5)', () => {
+      it('treats fractional timeout as-is (setTimeout rounds down)', async () => {
+        vi.useFakeTimers()
+
+        const resultPromise = safe.async(
+          () => new Promise<never>(() => {}),
+          { abortAfter: 1.5 },
+        )
+
+        await vi.advanceTimersByTimeAsync(2)
+
+        const [value, error] = await resultPromise
+        expect(value).toBeNull()
+        expect(error).toBeInstanceOf(TimeoutError)
+        expect((error as TimeoutError).message).toBe('Operation timed out after 1.5ms')
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('abortAfter: -1', () => {
+      it('treats negative timeout like 0 (next-tick timeout)', async () => {
+        vi.useFakeTimers()
+
+        const resultPromise = safe.async(
+          () => new Promise<never>(() => {}),
+          { abortAfter: -1 },
+        )
+
+        await vi.advanceTimersByTimeAsync(0)
+
+        const [value, error] = await resultPromise
+        expect(value).toBeNull()
+        expect(error).toBeInstanceOf(TimeoutError)
+        expect((error as TimeoutError).message).toBe('Operation timed out after -1ms')
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('retry.times as float', () => {
+      it('times: 2.5 results in 3 attempts (maxAttempts = 3.5, loop runs while attempt <= 3.5)', async () => {
+        const fn = vi.fn(() => Promise.reject(new Error('fail')))
+
+        const [value, error] = await safe.async(fn, {
+          retry: { times: 2.5 },
+        })
+
+        expect(value).toBeNull()
+        expect(error).toBeInstanceOf(Error)
+        expect(fn).toHaveBeenCalledTimes(3)
+      })
+
+      it('times: 0.5 results in 1 attempt (maxAttempts = 1.5, loop runs once)', async () => {
+        const fn = vi.fn(() => Promise.reject(new Error('fail')))
+
+        const [value, error] = await safe.async(fn, {
+          retry: { times: 0.5 },
+        })
+
+        expect(value).toBeNull()
+        expect(error).toBeInstanceOf(Error)
+        expect(fn).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    describe('retry.times as negative', () => {
+      it('times: -1 results in zero iterations (maxAttempts = 0, fn never called)', async () => {
+        const fn = vi.fn(() => Promise.reject(new Error('fail')))
+
+        const result = await safe.async(fn, {
+          retry: { times: -1 },
+        })
+
+        // fn is never called because loop condition `1 <= 0` is false
+        expect(fn).not.toHaveBeenCalled()
+        // lastError is uninitialized (declared with `!`), so err(undefined) is returned
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeUndefined()
+        expect(result.ok).toBe(false)
+      })
+    })
+
+    describe('waitBefore returning negative', () => {
+      it('negative waitBefore causes no delay (guarded by waitMs > 0)', async () => {
+        vi.useFakeTimers()
+        let callCount = 0
+
+        const fn = vi.fn(async () => {
+          callCount++
+          if (callCount < 3) throw new Error(`fail ${callCount}`)
+          return 'success'
+        })
+
+        const resultPromise = safe.async(fn, {
+          retry: { times: 2, waitBefore: () => -100 },
+        })
+
+        // No timer advance needed — negative waitBefore skips sleep
+        const [value, error] = await resultPromise
+
+        expect(value).toBe('success')
+        expect(error).toBeNull()
+        expect(fn).toHaveBeenCalledTimes(3)
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('parseResult returning a Promise in sync context', () => {
+      it('returns the Promise object itself as the value (not awaited)', () => {
+        const result = safe.sync(() => 42, {
+          parseResult: () => Promise.resolve(99),
+        })
+
+        expect(result[0]).toBeInstanceOf(Promise)
+        expect(result[1]).toBeNull()
+        expect(result.ok).toBe(true)
+      })
+    })
+
+    describe('safe.all short-circuit ignores late results', () => {
+      it('resolves with error immediately and ignores slow op that resolves later', async () => {
+        vi.useFakeTimers()
+        const slowResolved = vi.fn()
+
+        const resultPromise = safe.all({
+          fast: safe.async(() => Promise.reject(new Error('fast fail'))),
+          slow: safe.async(
+            () =>
+              new Promise<string>((resolve) => {
+                setTimeout(() => {
+                  slowResolved()
+                  resolve('done')
+                }, 10_000)
+              }),
+          ),
+        })
+
+        // Let the microtask queue flush so the fast rejection is processed
+        await vi.advanceTimersByTimeAsync(0)
+
+        const [data, error] = await resultPromise
+        expect(data).toBeNull()
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toBe('fast fail')
+
+        // Advance past the slow op's timer — its callback fires, but safe.all already resolved
+        await vi.advanceTimersByTimeAsync(10_000)
+        expect(slowResolved).toHaveBeenCalled()
+
+        // The result hasn't changed — still the same error
+        expect(data).toBeNull()
+        expect(error).toBeInstanceOf(Error)
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('safe.all handles rejecting promises', () => {
+      it('returns error when a promise rejects with an Error', async () => {
+        const [data, error] = await safe.all({
+          good: safe.async(() => Promise.resolve('ok')),
+          bad: Promise.reject(new Error('unexpected rejection')),
+        })
+        expect(data).toBeNull()
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toBe('unexpected rejection')
+      })
+
+      it('wraps non-Error rejections in an Error', async () => {
+        const [data, error] = await safe.all({
+          bad: Promise.reject('string rejection'),
+        })
+        expect(data).toBeNull()
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toBe('string rejection')
+        expect((error as Error).cause).toBe('string rejection')
+      })
+    })
+
+    describe('safe.all concurrent error ordering', () => {
+      it('returns the first error to settle, not necessarily the first key', async () => {
+        vi.useFakeTimers()
+
+        const resultPromise = safe.all({
+          // 'a' fails slowly (after 200ms)
+          a: safe.async(() => new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('slow error')), 200)
+          )),
+          // 'b' fails quickly (after 50ms)
+          b: safe.async(() => new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('fast error')), 50)
+          )),
+        })
+
+        await vi.advanceTimersByTimeAsync(50)
+        const [data, error] = await resultPromise
+
+        expect(data).toBeNull()
+        expect((error as Error).message).toBe('fast error')
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('withTimeout late resolution after timeout (coverage for .finally cleanup)', () => {
+      it('clearTimeout fires in .finally even when original promise resolves after timeout', async () => {
+        vi.useFakeTimers()
+
+        let resolveManually!: (value: string) => void
+        const fn = vi.fn().mockImplementation(
+          () => new Promise<string>((resolve) => { resolveManually = resolve })
+        )
+
+        const promise = safe.async(fn, { abortAfter: 50 })
+
+        // Timeout fires
+        await vi.advanceTimersByTimeAsync(50)
+        const result = await promise
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(TimeoutError)
+
+        // Late resolution after timeout — exercises the .finally() cleanup path
+        resolveManually('late value')
+
+        // Flush microtasks to ensure late resolution is processed
+        await vi.advanceTimersByTimeAsync(0)
+
+        // No unhandled rejection or crash
+        expect(result[1]).toBeInstanceOf(TimeoutError)
+
+        vi.useRealTimers()
+      })
+
+      it('clearTimeout fires in .finally even when original promise rejects after timeout', async () => {
+        vi.useFakeTimers()
+
+        let rejectManually!: (reason: Error) => void
+        const fn = vi.fn().mockImplementation(
+          () => new Promise<string>((_, reject) => { rejectManually = reject })
+        )
+
+        const promise = safe.async(fn, { abortAfter: 50 })
+
+        // Timeout fires
+        await vi.advanceTimersByTimeAsync(50)
+        const result = await promise
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(TimeoutError)
+
+        // Late rejection after timeout — exercises the .finally() cleanup path
+        rejectManually(new Error('late rejection'))
+
+        // Flush microtasks
+        await vi.advanceTimersByTimeAsync(0)
+
+        // No unhandled rejection or crash
+        expect(result[1]).toBeInstanceOf(TimeoutError)
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('safe.allSettled handles rejecting promises', () => {
+      it('returns error result for a rejecting promise', async () => {
+        const results = await safe.allSettled({
+          good: safe.async(() => Promise.resolve('ok')),
+          bad: Promise.reject(new Error('unexpected rejection')),
+        })
+        expect(results.good.ok).toBe(true)
+        expect(results.good.value).toBe('ok')
+        expect(results.bad.ok).toBe(false)
+        expect(results.bad.error).toBeInstanceOf(Error)
+        expect((results.bad.error as Error).message).toBe('unexpected rejection')
+      })
+
+      it('wraps non-Error rejections in an Error', async () => {
+        const results = await safe.allSettled({
+          bad: Promise.reject('string rejection'),
+        })
+        expect(results.bad.ok).toBe(false)
+        expect(results.bad.error).toBeInstanceOf(Error)
+        expect((results.bad.error as Error).message).toBe('string rejection')
+        expect((results.bad.error as Error).cause).toBe('string rejection')
+      })
+    })
+
+    describe('ok(undefined) vs err(undefined) discriminant', () => {
+      it('ok(undefined) and err(undefined) are distinguishable via .ok', () => {
+        const success = ok(undefined)
+        const failure = err(undefined)
+
+        // Both have undefined in the tuple, but discriminants differ
+        expect(success[0]).toBeUndefined()
+        expect(success[1]).toBeNull()
+        expect(success.ok).toBe(true)
+        expect(success.value).toBeUndefined()
+        expect(success.error).toBeNull()
+
+        expect(failure[0]).toBeNull()
+        expect(failure[1]).toBeUndefined()
+        expect(failure.ok).toBe(false)
+        expect(failure.value).toBeNull()
+        expect(failure.error).toBeUndefined()
+      })
+
+      it('tuple destructuring of err(undefined) gives falsy error', () => {
+        const result = err(undefined)
+        const [value, error] = result
+
+        // error is undefined — falsy! Only .ok is reliable for discrimination
+        expect(value).toBeNull()
+        expect(error).toBeUndefined()
+        expect(!error).toBe(true)
+        expect(result.ok).toBe(false)
+      })
+    })
+
+    describe('parseError that returns a falsy type is a compile error', () => {
+      it('rejects parseError returning undefined at compile time', () => {
+        // @ts-expect-error — parseError must not return a falsy type
+        safe.async(() => Promise.reject(new Error('x')), () => undefined)
+      })
+
+      it('rejects parseError returning null at compile time', () => {
+        // @ts-expect-error — parseError must not return a falsy type
+        safe.async(() => Promise.reject(new Error('x')), () => null)
+      })
+
+      it('rejects parseError returning false at compile time', () => {
+        // @ts-expect-error — parseError must not return a falsy type
+        safe.async(() => Promise.reject(new Error('x')), () => false)
+      })
+
+      it('rejects parseError returning 0 at compile time', () => {
+        // @ts-expect-error — parseError must not return a falsy type
+        safe.async(() => Promise.reject(new Error('x')), () => 0 as const)
+      })
+
+      it('rejects parseError returning empty string at compile time', () => {
+        // @ts-expect-error — parseError must not return a falsy type
+        safe.async(() => Promise.reject(new Error('x')), () => '' as const)
+      })
+
+      it('still allows truthy error types', () => {
+        // These should compile fine
+        safe.async(() => Promise.reject(new Error('x')), (e) => ({ message: String(e) }))
+        safe.async(() => Promise.reject(new Error('x')), (e) => String(e))
+        safe.async(() => Promise.reject(new Error('x')), (e) => e instanceof Error ? e : new Error(String(e)))
+      })
+    })
+
+    describe('concurrent calls to same wrapAsync result', () => {
+      it('all calls complete independently with correct mutable closure state', async () => {
+        let counter = 0
+
+        const wrapped = safe.wrapAsync(async (id: number) => {
+          counter++
+          // Simulate async work
+          await new Promise((r) => setTimeout(r, 10))
+          return `result-${id}`
+        })
+
+        // Fire all calls concurrently
+        const results = await Promise.all([
+          wrapped(1),
+          wrapped(2),
+          wrapped(3),
+          wrapped(4),
+          wrapped(5),
+        ])
+
+        // All calls completed independently
+        expect(counter).toBe(5)
+        for (let i = 0; i < results.length; i++) {
+          expect(results[i].ok).toBe(true)
+          expect(results[i][0]).toBe(`result-${i + 1}`)
+          expect(results[i][1]).toBeNull()
+        }
       })
     })
   })

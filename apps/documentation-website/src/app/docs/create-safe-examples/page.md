@@ -32,6 +32,11 @@ export const appSafe = createSafe({
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     }
   },
+  defaultError: {
+    code: 'UNKNOWN_ERROR',
+    message: 'An unknown error occurred',
+    timestamp: new Date(),
+  },
   onSuccess: (result) => {
     metrics.increment('operation.success')
   },
@@ -104,6 +109,7 @@ export const apiSafe = createSafe({
       endpoint: '',
     }
   },
+  defaultError: { type: 'UNKNOWN', statusCode: 500, message: 'Unknown error', endpoint: '' },
   onSuccess: (result) => {
     logger.debug('API request succeeded', { result })
   },
@@ -203,6 +209,7 @@ export const dbSafe = createSafe({
 
     return { code: 'QUERY', message }
   },
+  defaultError: { code: 'UNKNOWN', message: 'Database error' },
   onSuccess: () => {
     metrics.increment('db.query.success')
   },
@@ -287,6 +294,7 @@ export const stripeSafe = createSafe({
       retryable: false,
     }
   },
+  defaultError: { code: 'API_ERROR', message: 'Unknown payment error', retryable: false },
   onError: (error) => {
     logger.error('Stripe operation failed', {
       code: error.code,
@@ -355,6 +363,12 @@ function createTenantSafe(tenantId: string): SafeInstance<TenantError> {
       tenantId,
       timestamp: new Date(),
     }),
+    defaultError: {
+      code: 'UNKNOWN',
+      message: 'Unknown error',
+      tenantId,
+      timestamp: new Date(),
+    },
     onSuccess: () => {
       metrics.increment('tenant.operation.success', { tenantId })
     },
