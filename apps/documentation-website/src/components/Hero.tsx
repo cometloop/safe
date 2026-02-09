@@ -10,34 +10,88 @@ import blurIndigoImage from '@/images/blur-indigo.png'
 
 const codeLanguage = 'typescript'
 
-const code = `import { safe } from '@cometloop/safe'
+const code = `import { safe, createSafe } from '@cometloop/safe'
+import { fetchUserAsync, fetchPostsAsync } from '@features'
+import { errorParser, resultParser } from '@lib/utils'
+import { errorHook, successHook } from '@lib/hooks'
 
-// Instead of try-catch
-const [data, error] = safe.sync(() => JSON.parse(jsonString))
+// One-off wrapping — zero config
+const fetchUserOnce = safe.wrapAsync(fetchUserAsync)
+const [basicUser, basicError] = await fetchUserOnce('admin-456')
 
-if (error) {
-  console.error('Parse failed:', error.message)
-  return
-}
-
-console.log(data) // typed and safe
-
-// Async with retry and timeout
-const [user, fetchError] = await safe.async(
-  (signal) => fetch('/api/user', { signal }),
-  {
-    retry: { times: 3, waitBefore: (n) => n * 1000 },
-    abortAfter: 5000,
-  }
-)
-
-// Wrap any function for reuse
-const safeDivide = safe.wrap((a: number, b: number) => {
-  if (b === 0) throw new Error('Division by zero')
-  return a / b
+// Configurable safety — from one function to many
+const apiSafe = createSafe({
+  parseError: errorParser,
+  parseResult: resultParser,
+  onError: errorHook,
+  onSuccess: successHook,
 })
 
-const [result, divError] = safeDivide(10, 2) // [5, null]`
+const fetchUser = apiSafe.wrapAsync(fetchUserAsync)
+const fetchPosts = apiSafe.wrapAsync(fetchPostsAsync)
+
+// Same API. More power.
+const [user, userError] = await fetchUser('123')
+if (userError) return
+
+const [posts, postsError] = await fetchPosts(user.id)
+if (postsError) return
+
+// Fully type-narrowed — never undefined
+console.log(user.name)
+console.log(posts.length)`
+
+// const code = `import { safe } from '@cometloop/safe'
+// import { fetchUserAsync } from '@lib/api'
+// import { myErrorParser } from '@lib/errors'
+
+// const fetchUser = safe.wrap(fetchUserAsync)
+// const [user, error] = await fetchUser('admin-456')
+
+// // provied the same parsers and hooks to any wrapped func
+// const apiSafe = createSafe({
+//   parseError: myErrorParser,
+//   onError: () => {
+//     // log
+//   }
+//   onSuccess: () => {
+//   // log
+//   },
+// })
+
+// const apiFetchUser = apiSafe.wrap(fetchUserAsync)
+
+// const [user, myErrorParserError] = await apiFetchUser('123') // typed to myErrorParser error type
+// `
+
+// const code = `import { safe } from '@cometloop/safe'
+
+// // Instead of try-catch
+// const [data, error] = safe.sync(() => JSON.parse(jsonString))
+
+// if (error) {
+//   console.error('Parse failed:', error.message)
+//   return
+// }
+
+// console.log(data) // typed and safe
+
+// // Async with retry and timeout
+// const [user, fetchError] = await safe.async(
+//   (signal) => fetch('/api/user', { signal }),
+//   {
+//     retry: { times: 3, waitBefore: (n) => n * 1000 },
+//     abortAfter: 5000,
+//   }
+// )
+
+// // Wrap any function for reuse
+// const safeDivide = safe.wrap((a: number, b: number) => {
+//   if (b === 0) throw new Error('Division by zero')
+//   return a / b
+// })
+
+// const [result, divError] = safeDivide(10, 2) // [5, null]`
 
 const tabs = [{ name: 'example.ts', isActive: true }]
 
@@ -71,8 +125,9 @@ export function Hero() {
                 Type-safe error handling for TypeScript.
               </p>
               <p className="mt-3 text-2xl tracking-tight text-slate-400">
-                Explicit [result, error] tuples with explicit error and response
-                parsing. No try/catch. No hidden control flow.
+                Wrap any function — all returning <code>[result, error]</code>.
+                <br />
+                Powerful typed parsing, zero try/catch, built-in hooks.
               </p>
               <div className="mt-8 flex gap-4 md:justify-center lg:justify-start">
                 <Button href="/docs/installation">Get started</Button>

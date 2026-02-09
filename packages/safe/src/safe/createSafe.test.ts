@@ -1402,7 +1402,7 @@ describe('createSafe', () => {
       ).toThrow('parseError threw')
     })
 
-    it('handles default onSuccess that throws (caught by safe)', () => {
+    it('handles default onSuccess that throws (swallowed, success result returned)', () => {
       const appSafe = createSafe({
         parseError: (e) => ({
           source: 'hook',
@@ -1413,13 +1413,13 @@ describe('createSafe', () => {
         },
       })
 
-      // When onSuccess throws, it's caught by the safe wrapper and returned as an error
+      // Hook errors are swallowed — the successful result is still returned
       const result = appSafe.sync(() => 42)
-      expect(result[0]).toBeNull()
-      expect(result[1]).toEqual({ source: 'hook', message: 'onSuccess threw' })
+      expect(result[0]).toBe(42)
+      expect(result[1]).toBeNull()
     })
 
-    it('handles default onError that throws (propagates since its after catch)', () => {
+    it('handles default onError that throws (swallowed, error result returned)', () => {
       const appSafe = createSafe({
         parseError: (e) => String(e),
         onError: () => {
@@ -1427,12 +1427,12 @@ describe('createSafe', () => {
         },
       })
 
-      // onError is called after the catch block completes, so it propagates
-      expect(() =>
-        appSafe.sync(() => {
-          throw new Error('original')
-        })
-      ).toThrow('onError threw')
+      // Hook errors are swallowed — the original error result is still returned
+      const result = appSafe.sync(() => {
+        throw new Error('original')
+      })
+      expect(result[0]).toBeNull()
+      expect(result[1]).toBe('Error: original')
     })
 
     it('handles empty config with only parseError', () => {

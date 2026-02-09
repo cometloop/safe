@@ -1,11 +1,36 @@
 import type { SafeResult, SafeHooks, SafeAsyncHooks } from './types'
-import { TimeoutError } from './types'
+import { TimeoutError, ok, err } from './types'
+
+// Valid keys for SafeHooks and SafeAsyncHooks
+const HOOK_KEYS: ReadonlySet<string> = new Set([
+  'parseResult',
+  'onSuccess',
+  'onError',
+  'onSettled',
+  'onRetry',
+  'retry',
+  'abortAfter',
+])
 
 // Type guard to distinguish hooks object from parseError function
 const isHooks = <T, E, TContext extends unknown[]>(
   arg: unknown
 ): arg is SafeHooks<T, E, TContext> =>
-  typeof arg === 'object' && arg !== null && !Array.isArray(arg)
+  typeof arg === 'object' &&
+  arg !== null &&
+  !Array.isArray(arg) &&
+  Object.keys(arg).every(key => HOOK_KEYS.has(key))
+
+// Safely call a hook, swallowing any errors it throws.
+// A logging hook throwing should never crash the application
+// or alter the returned SafeResult.
+const callHook = (fn: (() => void) | undefined): void => {
+  try {
+    fn?.()
+  } catch {
+    // Intentionally swallowed
+  }
+}
 
 // Helper for async delays
 const sleep = (ms: number): Promise<void> =>
@@ -30,7 +55,29 @@ const withTimeout = <T>(
   })
 }
 
-// Sync overloads
+/**
+ * Execute a synchronous function and return a result tuple instead of throwing.
+ *
+ * Catches any error thrown by `fn` and returns `[null, error]`.
+ * On success, returns `[result, null]`.
+ *
+ * @param fn - The synchronous function to execute.
+ * @param parseError - Optional function to transform the caught error into a custom type `E`.
+ * @param hooks - Optional hooks for side effects (`parseResult`, `onSuccess`, `onError`, `onSettled`).
+ * @returns A `SafeResult<T, E>` tuple: `[value, null]` on success or `[null, error]` on failure.
+ *
+ * @example
+ * ```typescript
+ * const [user, error] = safe.sync(() => JSON.parse(rawJson))
+ *
+ * // With custom error parsing and hooks
+ * const [value, err] = safe.sync(
+ *   () => riskyOperation(),
+ *   (e) => ({ code: 'PARSE_ERROR', message: String(e) }),
+ *   { onError: (error) => console.error(error.code) }
+ * )
+ * ```
+ */
 function safeSync<T>(fn: () => T): SafeResult<T, Error>
 function safeSync<T, TOut = T>(
   fn: () => T,
@@ -66,18 +113,39 @@ function safeSync<T, E = Error, TOut = T>(
     const result = (resolvedHooks?.parseResult
       ? resolvedHooks.parseResult(rawResult)
       : rawResult) as TOut
-    resolvedHooks?.onSuccess?.(result, context)
-    resolvedHooks?.onSettled?.(result, null, context)
-    return [result, null]
+    callHook(() => resolvedHooks?.onSuccess?.(result, context))
+    callHook(() => resolvedHooks?.onSettled?.(result, null, context))
+    return ok(result)
   } catch (e) {
     const error = parseError ? parseError(e) : (e as E)
-    resolvedHooks?.onError?.(error, context)
-    resolvedHooks?.onSettled?.(null, error, context)
-    return [null, error]
+    callHook(() => resolvedHooks?.onError?.(error, context))
+    callHook(() => resolvedHooks?.onSettled?.(null, error, context))
+    return err(error)
   }
 }
 
-// Async overloads
+/**
+ * Execute an asynchronous function and return a result tuple instead of throwing.
+ *
+ * Catches any error thrown or rejected by `fn` and returns `[null, error]`.
+ * On success, returns `[result, null]`. Supports retry and timeout via hooks.
+ *
+ * @param fn - The async function to execute. Receives an optional `AbortSignal` when `abortAfter` is configured.
+ * @param parseError - Optional function to transform the caught error into a custom type `E`.
+ * @param hooks - Optional hooks including `retry`, `abortAfter`, `onRetry`, `parseResult`, `onSuccess`, `onError`, `onSettled`.
+ * @returns A `Promise<SafeResult<T, E>>` tuple: `[value, null]` on success or `[null, error]` on failure.
+ *
+ * @example
+ * ```typescript
+ * const [data, error] = await safe.async(() => fetch('/api/users').then(r => r.json()))
+ *
+ * // With retry and timeout
+ * const [data, error] = await safe.async(
+ *   (signal) => fetch('/api/users', { signal }).then(r => r.json()),
+ *   { retry: { times: 3 }, abortAfter: 5000 }
+ * )
+ * ```
+ */
 function safeAsync<T>(fn: (signal?: AbortSignal) => Promise<T>): Promise<SafeResult<T, Error>>
 function safeAsync<T, TOut = T>(
   fn: (signal?: AbortSignal) => Promise<T>,
@@ -110,6 +178,7 @@ async function safeAsync<T, E = Error, TOut = T>(
 
   const maxAttempts = (resolvedHooks?.retry?.times ?? 0) + 1
   const abortAfter = resolvedHooks?.abortAfter
+  let lastError!: E
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Create a fresh AbortController for each attempt if timeout is configured
@@ -127,33 +196,52 @@ async function safeAsync<T, E = Error, TOut = T>(
       const result = (resolvedHooks?.parseResult
         ? resolvedHooks.parseResult(rawResult)
         : rawResult) as TOut
-      resolvedHooks?.onSuccess?.(result, context)
-      resolvedHooks?.onSettled?.(result, null, context)
-      return [result, null]
+      callHook(() => resolvedHooks?.onSuccess?.(result, context))
+      callHook(() => resolvedHooks?.onSettled?.(result, null, context))
+      return ok(result)
     } catch (e) {
-      const error = parseError ? parseError(e) : (e as E)
+      lastError = parseError ? parseError(e) : (e as E)
 
       // If not the last attempt, call onRetry and potentially wait
       if (attempt < maxAttempts) {
-        resolvedHooks?.onRetry?.(error, attempt, context)
+        callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, context))
         const waitMs = resolvedHooks?.retry?.waitBefore?.(attempt) ?? 0
         if (waitMs > 0) {
           await sleep(waitMs)
         }
-      } else {
-        // Final attempt failed, call onError
-        resolvedHooks?.onError?.(error, context)
-        resolvedHooks?.onSettled?.(null, error, context)
-        return [null, error]
       }
     }
   }
 
-  // This should never be reached, but TypeScript needs it
-  throw new Error('Unexpected end of retry loop')
+  callHook(() => resolvedHooks?.onError?.(lastError, context))
+  callHook(() => resolvedHooks?.onSettled?.(null, lastError, context))
+  return err(lastError)
 }
 
-// Wrap overloads - preserves function parameters
+/**
+ * Wrap a synchronous function so it returns a result tuple instead of throwing.
+ *
+ * Returns a new function with the same parameter signature that catches
+ * errors and returns `[null, error]` instead of throwing. The original
+ * arguments are passed through to hooks as context.
+ *
+ * @param fn - The synchronous function to wrap.
+ * @param parseError - Optional function to transform the caught error into a custom type `E`.
+ * @param hooks - Optional hooks for side effects (`parseResult`, `onSuccess`, `onError`, `onSettled`). Hooks receive the original call arguments as context.
+ * @returns A wrapped function `(...args) => SafeResult<T, E>`.
+ *
+ * @example
+ * ```typescript
+ * const safeJsonParse = safe.wrap(JSON.parse)
+ * const [data, error] = safeJsonParse('{"valid": true}')
+ *
+ * // With hooks that receive the original arguments
+ * const safeDivide = safe.wrap(
+ *   (a: number, b: number) => { if (b === 0) throw new Error('Division by zero'); return a / b },
+ *   { onError: (error, [a, b]) => console.error(`Failed to divide ${a} by ${b}`) }
+ * )
+ * ```
+ */
 function wrap<TArgs extends unknown[], T>(
   fn: (...args: TArgs) => T
 ): (...args: TArgs) => SafeResult<T, Error>
@@ -191,20 +279,45 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
       const result = (resolvedHooks?.parseResult
         ? resolvedHooks.parseResult(rawResult)
         : rawResult) as TOut
-      resolvedHooks?.onSuccess?.(result, args)
-      resolvedHooks?.onSettled?.(result, null, args)
-      return [result, null]
+      callHook(() => resolvedHooks?.onSuccess?.(result, args))
+      callHook(() => resolvedHooks?.onSettled?.(result, null, args))
+      return ok(result)
     } catch (e) {
       const error = parseError ? parseError(e) : (e as E)
-      resolvedHooks?.onError?.(error, args)
-      resolvedHooks?.onSettled?.(null, error, args)
-      return [null, error]
+      callHook(() => resolvedHooks?.onError?.(error, args))
+      callHook(() => resolvedHooks?.onSettled?.(null, error, args))
+      return err(error)
     }
   }
 }
 
-// WrapAsync overloads - preserves function parameters
-// Note: When abortAfter is configured, the function receives an AbortSignal as the last argument
+/**
+ * Wrap an asynchronous function so it returns a result tuple instead of throwing.
+ *
+ * Returns a new function with the same parameter signature that catches
+ * errors and returns `[null, error]` instead of throwing. Supports retry
+ * and timeout via hooks. When `abortAfter` is configured, an `AbortSignal`
+ * is passed as an additional argument to the wrapped function.
+ *
+ * @param fn - The async function to wrap.
+ * @param parseError - Optional function to transform the caught error into a custom type `E`.
+ * @param hooks - Optional hooks including `retry`, `abortAfter`, `onRetry`, `parseResult`, `onSuccess`, `onError`, `onSettled`. Hooks receive the original call arguments as context.
+ * @returns A wrapped function `(...args) => Promise<SafeResult<T, E>>`.
+ *
+ * @example
+ * ```typescript
+ * const safeFetchUser = safe.wrapAsync(
+ *   (id: string) => fetch(`/api/users/${id}`).then(r => r.json())
+ * )
+ * const [user, error] = await safeFetchUser('123')
+ *
+ * // With retry
+ * const safeFetch = safe.wrapAsync(
+ *   (url: string) => fetch(url).then(r => r.json()),
+ *   { retry: { times: 3, waitBefore: (attempt) => attempt * 1000 } }
+ * )
+ * ```
+ */
 function wrapAsync<TArgs extends unknown[], T>(
   fn: (...args: TArgs) => Promise<T>
 ): (...args: TArgs) => Promise<SafeResult<T, Error>>
@@ -240,6 +353,8 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
   const abortAfter = resolvedHooks?.abortAfter
 
   return async (...args: TArgs) => {
+    let lastError!: E
+
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // Create a fresh AbortController for each attempt if timeout is configured
       const controller = abortAfter !== undefined ? new AbortController() : undefined
@@ -266,30 +381,26 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
         const result = (resolvedHooks?.parseResult
           ? resolvedHooks.parseResult(rawResult)
           : rawResult) as TOut
-        resolvedHooks?.onSuccess?.(result, args)
-        resolvedHooks?.onSettled?.(result, null, args)
-        return [result, null]
+        callHook(() => resolvedHooks?.onSuccess?.(result, args))
+        callHook(() => resolvedHooks?.onSettled?.(result, null, args))
+        return ok(result)
       } catch (e) {
-        const error = parseError ? parseError(e) : (e as E)
+        lastError = parseError ? parseError(e) : (e as E)
 
         // If not the last attempt, call onRetry and potentially wait
         if (attempt < maxAttempts) {
-          resolvedHooks?.onRetry?.(error, attempt, args)
+          callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, args))
           const waitMs = resolvedHooks?.retry?.waitBefore?.(attempt) ?? 0
           if (waitMs > 0) {
             await sleep(waitMs)
           }
-        } else {
-          // Final attempt failed, call onError
-          resolvedHooks?.onError?.(error, args)
-          resolvedHooks?.onSettled?.(null, error, args)
-          return [null, error]
         }
       }
     }
 
-    // This should never be reached, but TypeScript needs it
-    throw new Error('Unexpected end of retry loop')
+    callHook(() => resolvedHooks?.onError?.(lastError, args))
+    callHook(() => resolvedHooks?.onSettled?.(null, lastError, args))
+    return err(lastError)
   }
 }
 

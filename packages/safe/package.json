@@ -2,10 +2,26 @@
   "name": "@cometloop/safe",
   "version": "0.0.1",
   "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "build": "tsup",
     "lint": "eslint \"**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -19,6 +35,7 @@
     "@vitest/coverage-v8": "^4.0.16",
     "@vitest/ui": "^4.0.16",
     "eslint": "^8.57.0",
+    "tsup": "^8.5.1",
     "typescript": "5.5.4",
     "vitest": "^4.0.16"
   }

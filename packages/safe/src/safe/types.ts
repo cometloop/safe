@@ -1,5 +1,39 @@
-// Result tuple: result first, error second
-export type SafeResult<T, E = Error> = readonly [T, null] | readonly [null, E]
+// Tagged result types: tuple intersection with discriminant properties
+export type SafeOk<T> = readonly [T, null] & {
+  readonly ok: true
+  readonly value: T
+  readonly error: null
+}
+
+export type SafeErr<E> = readonly [null, E] & {
+  readonly ok: false
+  readonly value: null
+  readonly error: E
+}
+
+export type SafeResult<T, E = Error> = SafeOk<T> | SafeErr<E>
+
+// Construct a success result
+export function ok<T>(value: T): SafeOk<T> {
+  const tuple = [value, null] as readonly [T, null]
+  Object.defineProperties(tuple, {
+    ok: { value: true, enumerable: false },
+    value: { value, enumerable: false },
+    error: { value: null, enumerable: false },
+  })
+  return tuple as SafeOk<T>
+}
+
+// Construct an error result
+export function err<E>(error: E): SafeErr<E> {
+  const tuple = [null, error] as readonly [null, E]
+  Object.defineProperties(tuple, {
+    ok: { value: false, enumerable: false },
+    value: { value: null, enumerable: false },
+    error: { value: error, enumerable: false },
+  })
+  return tuple as SafeErr<E>
+}
 
 // Timeout error class for abortAfter functionality
 export class TimeoutError extends Error {

@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   safe,
+  ok,
+  err,
   TimeoutError,
+  type SafeOk,
+  type SafeErr,
   type SafeResult,
   type SafeHooks,
   type SafeAsyncHooks,
@@ -2726,6 +2730,941 @@ describe('safe', () => {
         const onSuccess = vi.fn()
         safe.sync(() => 42, { onSuccess })
         expect(onSuccess).toHaveBeenCalledWith(42, [])
+      })
+    })
+  })
+
+  describe('async edge cases (timeout + retry + abort interactions)', () => {
+    describe('onRetry with TimeoutError', () => {
+      it('receives correct 1-indexed attempt number when timeout triggers retry', async () => {
+        vi.useFakeTimers()
+
+        const fn = vi.fn().mockImplementation(
+          () => new Promise((resolve) => setTimeout(() => resolve('done'), 500))
+        )
+        const onRetry = vi.fn()
+
+        const promise = safe.async(fn, {
+          abortAfter: 100,
+          retry: { times: 2 },
+          onRetry,
+        })
+
+        // Attempt 1 times out
+        await vi.advanceTimersByTimeAsync(100)
+        // Attempt 2 times out
+        await vi.advanceTimersByTimeAsync(100)
+        // Attempt 3 times out (final, no onRetry)
+        await vi.advanceTimersByTimeAsync(100)
+
+        await promise
+
+        expect(onRetry).toHaveBeenCalledTimes(2)
+        expect(onRetry).toHaveBeenNthCalledWith(1, expect.any(TimeoutError), 1, [])
+        expect(onRetry).toHaveBeenNthCalledWith(2, expect.any(TimeoutError), 2, [])
+
+        vi.useRealTimers()
+      })
+
+      it('receives TimeoutError through parseError during retry', async () => {
+        vi.useFakeTimers()
+
+        const fn = vi.fn().mockImplementation(
+          () => new Promise((resolve) => setTimeout(() => resolve('done'), 500))
+        )
+        const parseError = vi.fn((e: unknown) => ({
+          type: e instanceof TimeoutError ? 'timeout' : 'other',
+          message: e instanceof Error ? e.message : 'unknown',
+        }))
+        const onRetry = vi.fn()
+
+        const promise = safe.async(fn, parseError, {
+          abortAfter: 100,
+          retry: { times: 1 },
+          onRetry,
+        })
+
+        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(onRetry).toHaveBeenCalledWith(
+          { type: 'timeout', message: 'Operation timed out after 100ms' },
+          1,
+          []
+        )
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('onSettled with TimeoutError', () => {
+      it('receives TimeoutError when operation times out (no retry)', async () => {
+        vi.useFakeTimers()
+
+        const onSettled = vi.fn()
+        const onError = vi.fn()
+
+        const promise = safe.async(
+          () => new Promise((resolve) => setTimeout(() => resolve('done'), 500)),
+          {
+            abortAfter: 100,
+            onError,
+            onSettled,
+          }
+        )
+
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(onError).toHaveBeenCalledTimes(1)
+        expect(onError).toHaveBeenCalledWith(expect.any(TimeoutError), [])
+        expect(onSettled).toHaveBeenCalledTimes(1)
+        expect(onSettled).toHaveBeenCalledWith(null, expect.any(TimeoutError), [])
+
+        vi.useRealTimers()
+      })
+
+      it('receives TimeoutError after all retries exhausted', async () => {
+        vi.useFakeTimers()
+
+        const onSettled = vi.fn()
+
+        const promise = safe.async(
+          () => new Promise((resolve) => setTimeout(() => resolve('done'), 500)),
+          {
+            abortAfter: 100,
+            retry: { times: 1 },
+            onSettled,
+          }
+        )
+
+        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(onSettled).toHaveBeenCalledTimes(1)
+        expect(onSettled).toHaveBeenCalledWith(null, expect.any(TimeoutError), [])
+
+        vi.useRealTimers()
+      })
+
+      it('receives success when retry succeeds after timeout', async () => {
+        vi.useFakeTimers()
+
+        let attempts = 0
+        const fn = vi.fn().mockImplementation(() => {
+          attempts++
+          const delay = attempts < 2 ? 500 : 10
+          return new Promise((resolve) => setTimeout(() => resolve('ok'), delay))
+        })
+        const onSettled = vi.fn()
+
+        const promise = safe.async(fn, {
+          abortAfter: 100,
+          retry: { times: 1 },
+          onSettled,
+        })
+
+        // Attempt 1 times out
+        await vi.advanceTimersByTimeAsync(100)
+        // Attempt 2 succeeds quickly
+        await vi.advanceTimersByTimeAsync(10)
+        await promise
+
+        expect(onSettled).toHaveBeenCalledTimes(1)
+        expect(onSettled).toHaveBeenCalledWith('ok', null, [])
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('late promise resolution after timeout', () => {
+      it('timeout result is returned even if promise resolves later', async () => {
+        vi.useFakeTimers()
+
+        let resolveManually!: (value: string) => void
+        const fn = vi.fn().mockImplementation(
+          () => new Promise<string>((resolve) => { resolveManually = resolve })
+        )
+
+        const promise = safe.async(fn, { abortAfter: 100 })
+
+        // Timeout fires
+        await vi.advanceTimersByTimeAsync(100)
+        const result = await promise
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(TimeoutError)
+
+        // Late resolution — should not cause issues
+        resolveManually('late value')
+
+        vi.useRealTimers()
+      })
+
+      it('timeout result is returned even if promise rejects later', async () => {
+        vi.useFakeTimers()
+
+        let rejectManually!: (reason: Error) => void
+        const fn = vi.fn().mockImplementation(
+          () => new Promise<string>((_resolve, reject) => { rejectManually = reject })
+        )
+
+        const promise = safe.async(fn, { abortAfter: 100 })
+
+        await vi.advanceTimersByTimeAsync(100)
+        const result = await promise
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(TimeoutError)
+
+        // Late rejection — should not cause unhandled rejection
+        rejectManually(new Error('late error'))
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('concurrent wrapAsync with retry + timeout', () => {
+      it('multiple concurrent calls each get independent retry + timeout state', async () => {
+        vi.useFakeTimers()
+
+        const callAttempts: Record<number, number> = {}
+
+        const fn = vi.fn().mockImplementation(async (callId: number) => {
+          callAttempts[callId] = (callAttempts[callId] || 0) + 1
+          if (callId === 1) {
+            // Call 1: always times out (slow)
+            return new Promise((resolve) => setTimeout(() => resolve('c1'), 500))
+          } else if (callId === 2) {
+            // Call 2: succeeds immediately
+            return `c2-attempt-${callAttempts[callId]}`
+          } else {
+            // Call 3: fails with regular error, then succeeds
+            if (callAttempts[callId] < 2) throw new Error('c3 fail')
+            return 'c3-success'
+          }
+        })
+
+        const wrapped = safe.wrapAsync(fn, {
+          abortAfter: 100,
+          retry: { times: 2 },
+        })
+
+        const p1 = wrapped(1)
+        const p2 = wrapped(2)
+        const p3 = wrapped(3)
+
+        // Advance enough for everything to settle
+        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(100)
+
+        const [r1, r2, r3] = await Promise.all([p1, p2, p3])
+
+        // Call 1: all 3 attempts timeout → TimeoutError
+        expect(r1[0]).toBeNull()
+        expect(r1[1]).toBeInstanceOf(TimeoutError)
+
+        // Call 2: succeeds on first attempt
+        expect(r2).toEqual(['c2-attempt-1', null])
+
+        // Call 3: fails once then succeeds
+        expect(r3).toEqual(['c3-success', null])
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('hook ordering with timeout', () => {
+      it('follows parseError → onError → onSettled order on timeout', async () => {
+        vi.useFakeTimers()
+
+        const callOrder: string[] = []
+
+        const parseError = vi.fn((e: unknown) => {
+          callOrder.push('parseError')
+          return {
+            type: e instanceof TimeoutError ? 'timeout' : 'other',
+            message: e instanceof Error ? e.message : 'unknown',
+          }
+        })
+        const onError = vi.fn(() => callOrder.push('onError'))
+        const onSettled = vi.fn(() => callOrder.push('onSettled'))
+
+        const promise = safe.async(
+          () => new Promise((resolve) => setTimeout(() => resolve('done'), 500)),
+          parseError,
+          {
+            abortAfter: 100,
+            onError,
+            onSettled,
+          }
+        )
+
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(callOrder).toEqual(['parseError', 'onError', 'onSettled'])
+
+        vi.useRealTimers()
+      })
+
+      it('follows parseError → onRetry → (wait) → … → parseError → onError → onSettled with retry', async () => {
+        vi.useFakeTimers()
+
+        const callOrder: string[] = []
+
+        const parseError = vi.fn((e: unknown) => {
+          callOrder.push('parseError')
+          return e instanceof TimeoutError ? 'timeout' : 'error'
+        })
+        const onRetry = vi.fn(() => callOrder.push('onRetry'))
+        const onError = vi.fn(() => callOrder.push('onError'))
+        const onSettled = vi.fn(() => callOrder.push('onSettled'))
+
+        const promise = safe.async(
+          () => new Promise((resolve) => setTimeout(() => resolve('done'), 500)),
+          parseError,
+          {
+            abortAfter: 100,
+            retry: { times: 1 },
+            onRetry,
+            onError,
+            onSettled,
+          }
+        )
+
+        // Attempt 1 times out
+        await vi.advanceTimersByTimeAsync(100)
+        // Attempt 2 times out
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(callOrder).toEqual([
+          'parseError', 'onRetry',    // attempt 1 fails
+          'parseError', 'onError', 'onSettled', // attempt 2 fails (final)
+        ])
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('onRetry fires before waitBefore delay', () => {
+      it('onRetry is called then waitBefore delay occurs before next attempt', async () => {
+        vi.useFakeTimers()
+
+        const callOrder: string[] = []
+        let attempts = 0
+
+        const fn = vi.fn().mockImplementation(() => {
+          attempts++
+          callOrder.push(`attempt-${attempts}`)
+          if (attempts < 3) throw new Error('fail')
+          return Promise.resolve('success')
+        })
+
+        const onRetry = vi.fn(() => callOrder.push('onRetry'))
+
+        const promise = safe.async(fn, {
+          retry: {
+            times: 2,
+            waitBefore: () => 200,
+          },
+          onRetry,
+        })
+
+        // Attempt 1 runs immediately
+        await vi.advanceTimersByTimeAsync(0)
+        expect(callOrder).toEqual(['attempt-1', 'onRetry'])
+
+        // Wait 200ms for backoff
+        await vi.advanceTimersByTimeAsync(200)
+        expect(callOrder).toEqual(['attempt-1', 'onRetry', 'attempt-2', 'onRetry'])
+
+        // Wait 200ms for second backoff
+        await vi.advanceTimersByTimeAsync(200)
+        await promise
+
+        expect(callOrder).toEqual([
+          'attempt-1', 'onRetry',
+          'attempt-2', 'onRetry',
+          'attempt-3',
+        ])
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('mixed error types across retries', () => {
+      it('handles timeout on first attempt then regular error then success', async () => {
+        vi.useFakeTimers()
+
+        let attempts = 0
+        const fn = vi.fn().mockImplementation(async () => {
+          attempts++
+          if (attempts === 1) {
+            // First attempt: slow (will timeout)
+            return new Promise((resolve) => setTimeout(() => resolve('done'), 500))
+          }
+          if (attempts === 2) {
+            // Second attempt: regular error
+            throw new Error('network error')
+          }
+          // Third attempt: success
+          return 'success'
+        })
+        const onRetry = vi.fn()
+
+        const promise = safe.async(fn, {
+          abortAfter: 100,
+          retry: { times: 2 },
+          onRetry,
+        })
+
+        // Attempt 1 times out at 100ms
+        await vi.advanceTimersByTimeAsync(100)
+        // Attempt 2 throws immediately, attempt 3 succeeds immediately
+        await vi.advanceTimersByTimeAsync(0)
+        await promise
+
+        const result = await promise
+
+        expect(result).toEqual(['success', null])
+        expect(onRetry).toHaveBeenCalledTimes(2)
+        expect(onRetry.mock.calls[0][0]).toBeInstanceOf(TimeoutError)
+        expect(onRetry.mock.calls[1][0]).toBeInstanceOf(Error)
+        expect(onRetry.mock.calls[1][0].message).toBe('network error')
+
+        vi.useRealTimers()
+      })
+
+      it('handles regular error then timeout then success', async () => {
+        vi.useFakeTimers()
+
+        let attempts = 0
+        const fn = vi.fn().mockImplementation(async () => {
+          attempts++
+          if (attempts === 1) {
+            throw new Error('first fail')
+          }
+          if (attempts === 2) {
+            return new Promise((resolve) => setTimeout(() => resolve('done'), 500))
+          }
+          return 'success'
+        })
+        const onRetry = vi.fn()
+
+        const promise = safe.async(fn, {
+          abortAfter: 100,
+          retry: { times: 2 },
+          onRetry,
+        })
+
+        // Attempt 1 fails immediately
+        await vi.advanceTimersByTimeAsync(0)
+        // Attempt 2 times out
+        await vi.advanceTimersByTimeAsync(100)
+        // Attempt 3 succeeds
+        await vi.advanceTimersByTimeAsync(0)
+
+        const result = await promise
+
+        expect(result).toEqual(['success', null])
+        expect(onRetry).toHaveBeenCalledTimes(2)
+        expect(onRetry.mock.calls[0][0]).toBeInstanceOf(Error)
+        expect(onRetry.mock.calls[0][0].message).toBe('first fail')
+        expect(onRetry.mock.calls[1][0]).toBeInstanceOf(TimeoutError)
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('context in wrapAsync hooks with timeout', () => {
+      it('onRetry receives original args (without injected signal) as context', async () => {
+        vi.useFakeTimers()
+
+        const onRetry = vi.fn()
+
+        const wrapped = safe.wrapAsync(
+          async (id: number, name: string) => {
+            return new Promise((resolve) => setTimeout(() => resolve({ id, name }), 500))
+          },
+          {
+            abortAfter: 100,
+            retry: { times: 1 },
+            onRetry,
+          }
+        )
+
+        const promise = wrapped(42, 'test')
+        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(onRetry).toHaveBeenCalledWith(
+          expect.any(TimeoutError),
+          1,
+          [42, 'test'] // original args, not including injected signal
+        )
+
+        vi.useRealTimers()
+      })
+
+      it('onError and onSettled receive original args as context on timeout', async () => {
+        vi.useFakeTimers()
+
+        const onError = vi.fn()
+        const onSettled = vi.fn()
+
+        const wrapped = safe.wrapAsync(
+          async (id: number) => {
+            return new Promise((resolve) => setTimeout(() => resolve({ id }), 500))
+          },
+          {
+            abortAfter: 100,
+            onError,
+            onSettled,
+          }
+        )
+
+        const promise = wrapped(99)
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(onError).toHaveBeenCalledWith(expect.any(TimeoutError), [99])
+        expect(onSettled).toHaveBeenCalledWith(null, expect.any(TimeoutError), [99])
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('parseResult not called on timeout path', () => {
+      it('parseResult is not invoked when operation times out', async () => {
+        vi.useFakeTimers()
+
+        const parseResult = vi.fn((x: string) => x.toUpperCase())
+
+        const promise = safe.async(
+          () => new Promise<string>((resolve) => setTimeout(() => resolve('done'), 500)),
+          {
+            abortAfter: 100,
+            parseResult,
+          }
+        )
+
+        await vi.advanceTimersByTimeAsync(100)
+        const result = await promise
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(TimeoutError)
+        expect(parseResult).not.toHaveBeenCalled()
+
+        vi.useRealTimers()
+      })
+
+      it('parseResult is not invoked on timeout with wrapAsync', async () => {
+        vi.useFakeTimers()
+
+        const parseResult = vi.fn((x: { id: number }) => x.id)
+
+        const wrapped = safe.wrapAsync(
+          (id: number) =>
+            new Promise<{ id: number }>((resolve) =>
+              setTimeout(() => resolve({ id }), 500)
+            ),
+          {
+            abortAfter: 100,
+            parseResult,
+          }
+        )
+
+        const promise = wrapped(42)
+        await vi.advanceTimersByTimeAsync(100)
+        await promise
+
+        expect(parseResult).not.toHaveBeenCalled()
+
+        vi.useRealTimers()
+      })
+
+      it('parseResult is called only on successful attempts during retry', async () => {
+        vi.useFakeTimers()
+
+        let attempts = 0
+        const fn = vi.fn().mockImplementation(() => {
+          attempts++
+          const delay = attempts < 2 ? 500 : 10
+          return new Promise((resolve) => setTimeout(() => resolve(`result-${attempts}`), delay))
+        })
+        const parseResult = vi.fn((x: string) => x.toUpperCase())
+
+        const promise = safe.async(fn, {
+          abortAfter: 100,
+          retry: { times: 1 },
+          parseResult,
+        })
+
+        // Attempt 1 times out
+        await vi.advanceTimersByTimeAsync(100)
+        // Attempt 2 succeeds
+        await vi.advanceTimersByTimeAsync(10)
+        await promise
+
+        // parseResult only called for the successful attempt
+        expect(parseResult).toHaveBeenCalledTimes(1)
+        expect(parseResult).toHaveBeenCalledWith('result-2')
+
+        vi.useRealTimers()
+      })
+    })
+  })
+
+  describe('throwing hooks do not crash the application', () => {
+    const throwingHook = () => {
+      throw new Error('hook exploded')
+    }
+
+    describe('sync', () => {
+      it('returns success result when onSuccess throws', () => {
+        const result = safe.sync(() => 42, { onSuccess: throwingHook })
+        expect(result).toEqual([42, null])
+      })
+
+      it('returns success result when onSettled throws on success path', () => {
+        const result = safe.sync(() => 42, { onSettled: throwingHook })
+        expect(result).toEqual([42, null])
+      })
+
+      it('returns error result when onError throws', () => {
+        const result = safe.sync(
+          () => {
+            throw new Error('original')
+          },
+          { onError: throwingHook }
+        )
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('returns error result when onSettled throws on error path', () => {
+        const result = safe.sync(
+          () => {
+            throw new Error('original')
+          },
+          { onSettled: throwingHook }
+        )
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('still calls onSettled when onSuccess throws', () => {
+        const onSettled = vi.fn()
+        safe.sync(() => 42, { onSuccess: throwingHook, onSettled })
+        expect(onSettled).toHaveBeenCalledWith(42, null, [])
+      })
+
+      it('still calls onSettled when onError throws', () => {
+        const onSettled = vi.fn()
+        safe.sync(
+          () => {
+            throw new Error('original')
+          },
+          { onError: throwingHook, onSettled }
+        )
+        expect(onSettled).toHaveBeenCalledWith(null, expect.any(Error), [])
+      })
+    })
+
+    describe('async', () => {
+      it('returns success result when onSuccess throws', async () => {
+        const result = await safe.async(async () => 42, {
+          onSuccess: throwingHook,
+        })
+        expect(result).toEqual([42, null])
+      })
+
+      it('returns error result when onError throws', async () => {
+        const result = await safe.async(
+          async () => {
+            throw new Error('original')
+          },
+          { onError: throwingHook }
+        )
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('returns error result when onSettled throws on error path', async () => {
+        const result = await safe.async(
+          async () => {
+            throw new Error('original')
+          },
+          { onSettled: throwingHook }
+        )
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('continues retrying when onRetry throws', async () => {
+        let attempts = 0
+        const result = await safe.async(
+          async () => {
+            attempts++
+            if (attempts < 3) throw new Error(`attempt ${attempts}`)
+            return 'success'
+          },
+          { onRetry: throwingHook, retry: { times: 2 } }
+        )
+        expect(result).toEqual(['success', null])
+        expect(attempts).toBe(3)
+      })
+    })
+
+    describe('wrap', () => {
+      it('returns success result when onSuccess throws', () => {
+        const wrapped = safe.wrap((x: number) => x * 2, {
+          onSuccess: throwingHook,
+        })
+        expect(wrapped(5)).toEqual([10, null])
+      })
+
+      it('returns error result when onError throws', () => {
+        const wrapped = safe.wrap(
+          () => {
+            throw new Error('original')
+          },
+          { onError: throwingHook }
+        )
+        const result = wrapped()
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+    })
+
+    describe('wrapAsync', () => {
+      it('returns success result when onSuccess throws', async () => {
+        const wrapped = safe.wrapAsync(async (x: number) => x * 2, {
+          onSuccess: throwingHook,
+        })
+        expect(await wrapped(5)).toEqual([10, null])
+      })
+
+      it('returns error result when onError throws', async () => {
+        const wrapped = safe.wrapAsync(
+          async () => {
+            throw new Error('original')
+          },
+          { onError: throwingHook }
+        )
+        const result = await wrapped()
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('continues retrying when onRetry throws', async () => {
+        let attempts = 0
+        const wrapped = safe.wrapAsync(
+          async () => {
+            attempts++
+            if (attempts < 2) throw new Error(`attempt ${attempts}`)
+            return 'done'
+          },
+          { onRetry: throwingHook, retry: { times: 1 } }
+        )
+        expect(await wrapped()).toEqual(['done', null])
+        expect(attempts).toBe(2)
+      })
+    })
+  })
+
+  describe('tagged result properties (.ok, .value, .error)', () => {
+    describe('sync', () => {
+      it('has ok: true and value/error properties on success', () => {
+        const result = safe.sync(() => 42)
+
+        expect(result.ok).toBe(true)
+        expect(result.value).toBe(42)
+        expect(result.error).toBeNull()
+      })
+
+      it('has ok: false and value/error properties on failure', () => {
+        const error = new Error('fail')
+        const result = safe.sync(() => {
+          throw error
+        })
+
+        expect(result.ok).toBe(false)
+        expect(result.value).toBeNull()
+        expect(result.error).toBe(error)
+      })
+
+      it('discriminates null success from null error', () => {
+        const success = safe.sync(() => null)
+        const failure = safe.sync(() => {
+          throw null
+        })
+
+        // Both are [null, null] at the tuple level
+        expect(success[0]).toBeNull()
+        expect(success[1]).toBeNull()
+        expect(failure[0]).toBeNull()
+        expect(failure[1]).toBeNull()
+
+        // But discriminated by .ok
+        expect(success.ok).toBe(true)
+        expect(failure.ok).toBe(false)
+
+        expect(success.value).toBeNull()
+        expect(success.error).toBeNull()
+        expect(failure.value).toBeNull()
+        expect(failure.error).toBeNull()
+      })
+
+      it('tuple destructuring still works', () => {
+        const [value, error] = safe.sync(() => 42)
+
+        expect(value).toBe(42)
+        expect(error).toBeNull()
+      })
+    })
+
+    describe('async', () => {
+      it('has ok: true and value/error properties on success', async () => {
+        const result = await safe.async(async () => 'hello')
+
+        expect(result.ok).toBe(true)
+        expect(result.value).toBe('hello')
+        expect(result.error).toBeNull()
+      })
+
+      it('has ok: false and value/error properties on failure', async () => {
+        const error = new Error('async fail')
+        const result = await safe.async(async () => {
+          throw error
+        })
+
+        expect(result.ok).toBe(false)
+        expect(result.value).toBeNull()
+        expect(result.error).toBe(error)
+      })
+
+      it('discriminates null success from null error (async)', async () => {
+        const success = await safe.async(async () => null)
+        const failure = await safe.async(async () => {
+          throw null
+        })
+
+        expect(success.ok).toBe(true)
+        expect(failure.ok).toBe(false)
+      })
+
+      it('tuple destructuring still works (async)', async () => {
+        const [value, error] = await safe.async(async () => 99)
+
+        expect(value).toBe(99)
+        expect(error).toBeNull()
+      })
+    })
+
+    describe('wrap', () => {
+      it('has ok: true on success', () => {
+        const wrapped = safe.wrap((x: number) => x * 2)
+        const result = wrapped(5)
+
+        expect(result.ok).toBe(true)
+        expect(result.value).toBe(10)
+        expect(result.error).toBeNull()
+      })
+
+      it('has ok: false on failure', () => {
+        const wrapped = safe.wrap(() => {
+          throw new Error('wrap fail')
+        })
+        const result = wrapped()
+
+        expect(result.ok).toBe(false)
+        expect(result.value).toBeNull()
+        expect(result.error).toBeInstanceOf(Error)
+      })
+    })
+
+    describe('wrapAsync', () => {
+      it('has ok: true on success', async () => {
+        const wrapped = safe.wrapAsync(async (x: number) => x + 1)
+        const result = await wrapped(10)
+
+        expect(result.ok).toBe(true)
+        expect(result.value).toBe(11)
+        expect(result.error).toBeNull()
+      })
+
+      it('has ok: false on failure', async () => {
+        const wrapped = safe.wrapAsync(async () => {
+          throw new Error('wrapAsync fail')
+        })
+        const result = await wrapped()
+
+        expect(result.ok).toBe(false)
+        expect(result.value).toBeNull()
+        expect(result.error).toBeInstanceOf(Error)
+      })
+    })
+
+    describe('parseResult returning null still has ok: true', () => {
+      it('sync with parseResult returning null', () => {
+        const result = safe.sync(() => 42, {
+          parseResult: () => null,
+        })
+
+        expect(result.ok).toBe(true)
+        expect(result.value).toBeNull()
+        expect(result.error).toBeNull()
+      })
+
+      it('async with parseResult returning null', async () => {
+        const result = await safe.async(async () => 42, {
+          parseResult: () => null,
+        })
+
+        expect(result.ok).toBe(true)
+        expect(result.value).toBeNull()
+        expect(result.error).toBeNull()
+      })
+    })
+
+    describe('ok() and err() constructors', () => {
+      it('ok() creates a tagged success result', () => {
+        const result = ok(42)
+
+        expect(result).toEqual([42, null])
+        expect(result.ok).toBe(true)
+        expect(result.value).toBe(42)
+        expect(result.error).toBeNull()
+        expect(result[0]).toBe(42)
+        expect(result[1]).toBeNull()
+      })
+
+      it('err() creates a tagged error result', () => {
+        const error = new Error('test')
+        const result = err(error)
+
+        expect(result).toEqual([null, error])
+        expect(result.ok).toBe(false)
+        expect(result.value).toBeNull()
+        expect(result.error).toBe(error)
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(error)
+      })
+
+      it('ok(null) is distinguishable from err(null)', () => {
+        const success = ok(null)
+        const failure = err(null)
+
+        expect(success.ok).toBe(true)
+        expect(failure.ok).toBe(false)
       })
     })
   })
