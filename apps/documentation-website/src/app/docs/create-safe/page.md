@@ -29,6 +29,7 @@ type CreateSafeConfig<E, TResult = never> = {
   onRetry?: (error: E, attempt: number) => void // Optional: called before each retry
   retry?: RetryConfig                      // Optional: default retry config (async only)
   abortAfter?: number                      // Optional: default timeout (async only)
+  onHookError?: (error: unknown, hookName: string) => void // Optional: called when a hook throws
 }
 ```
 
@@ -198,6 +199,42 @@ const [token, authError] = authSafe.sync(() => verifyToken(jwt))
 // dbError is { type: 'DB_ERROR'; ... }
 // authError is { type: 'AUTH_ERROR'; ... }
 ```
+
+---
+
+## Hook error visibility
+
+Set a factory-level `onHookError` to catch hook errors across all operations:
+
+```ts
+const appSafe = createSafe({
+  parseError: (e) => String(e),
+  onSuccess: (result) => {
+    externalLogger.log(result) // might throw
+  },
+  onHookError: (err, hookName) => {
+    // Called when onSuccess (or any hook) throws
+    monitoring.trackHookFailure(hookName, err)
+  },
+})
+
+// All operations get hook error visibility
+appSafe.sync(() => computeValue())
+await appSafe.async(() => fetchData())
+```
+
+Per-call `onHookError` **overrides** the factory-level callback:
+
+```ts
+appSafe.sync(() => riskyOperation(), {
+  onHookError: (err, hookName) => {
+    // Replaces the factory onHookError for this call only
+    customLogger.warn(`${hookName} failed`, err)
+  },
+})
+```
+
+See [Hooks — onHookError](/docs/hooks#onhookerror) for more details.
 
 ---
 

@@ -1,5 +1,5 @@
 import type { SafeResult, SafeHooks, SafeAsyncHooks, CreateSafeConfig, SafeInstance } from './types'
-import { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled, callHook } from './safe'
+import { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled } from './safe'
 
 /**
  * Create a pre-configured safe instance with a fixed error mapping function
@@ -51,16 +51,16 @@ export function createSafe<E, TResult = never>(config: CreateSafeConfig<E, TResu
       parseResult: (hooks?.parseResult
         ?? defaultParseResult) as SafeHooks<T, E, TContext, TOut>['parseResult'],
       onSuccess: (result, context) => {
-        callHook(() => defaultOnSuccess?.(result), onHookError, 'onSuccess')
-        callHook(() => hooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
+        try { defaultOnSuccess?.(result) } catch (e) { try { onHookError?.(e, 'onSuccess') } catch {} }
+        hooks?.onSuccess?.(result, context)
       },
       onError: (error, context) => {
-        callHook(() => defaultOnError?.(error), onHookError, 'onError')
-        callHook(() => hooks?.onError?.(error, context), onHookError, 'onError')
+        try { defaultOnError?.(error) } catch (e) { try { onHookError?.(e, 'onError') } catch {} }
+        hooks?.onError?.(error, context)
       },
       onSettled: (result, error, context) => {
-        callHook(() => defaultOnSettled?.(result, error), onHookError, 'onSettled')
-        callHook(() => hooks?.onSettled?.(result, error, context), onHookError, 'onSettled')
+        try { defaultOnSettled?.(result, error) } catch (e) { try { onHookError?.(e, 'onSettled') } catch {} }
+        hooks?.onSettled?.(result, error, context)
       },
       onHookError,
     }
@@ -74,20 +74,20 @@ export function createSafe<E, TResult = never>(config: CreateSafeConfig<E, TResu
       parseResult: (hooks?.parseResult
         ?? defaultParseResult) as SafeAsyncHooks<T, E, TContext, TOut>['parseResult'],
       onSuccess: (result, context) => {
-        callHook(() => defaultOnSuccess?.(result), onHookError, 'onSuccess')
-        callHook(() => hooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
+        try { defaultOnSuccess?.(result) } catch (e) { try { onHookError?.(e, 'onSuccess') } catch {} }
+        hooks?.onSuccess?.(result, context)
       },
       onError: (error, context) => {
-        callHook(() => defaultOnError?.(error), onHookError, 'onError')
-        callHook(() => hooks?.onError?.(error, context), onHookError, 'onError')
+        try { defaultOnError?.(error) } catch (e) { try { onHookError?.(e, 'onError') } catch {} }
+        hooks?.onError?.(error, context)
       },
       onSettled: (result, error, context) => {
-        callHook(() => defaultOnSettled?.(result, error), onHookError, 'onSettled')
-        callHook(() => hooks?.onSettled?.(result, error, context), onHookError, 'onSettled')
+        try { defaultOnSettled?.(result, error) } catch (e) { try { onHookError?.(e, 'onSettled') } catch {} }
+        hooks?.onSettled?.(result, error, context)
       },
       onRetry: (error, attempt, context) => {
-        callHook(() => defaultOnRetry?.(error, attempt), onHookError, 'onRetry')
-        callHook(() => hooks?.onRetry?.(error, attempt, context), onHookError, 'onRetry')
+        try { defaultOnRetry?.(error, attempt) } catch (e) { try { onHookError?.(e, 'onRetry') } catch {} }
+        hooks?.onRetry?.(error, attempt, context)
       },
       // Per-call retry completely overrides default retry
       retry: hooks?.retry ?? defaultRetry,
