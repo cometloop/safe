@@ -464,22 +464,25 @@ async function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
     T[keyof T] extends Promise<SafeResult<any, infer E>> ? E : never
   >
 > {
+  type Values = { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never }
+  type Err = T[keyof T] extends Promise<SafeResult<any, infer E>> ? E : never
+
   const keys = Object.keys(promises)
   const values = Object.values(promises)
   const results = await Promise.all(values)
 
   for (const result of results) {
     if (!result.ok) {
-      return err(result[1]) as any
+      return err(result.error) as SafeResult<Values, Err>
     }
   }
 
   const obj: Record<string, unknown> = {}
   for (let i = 0; i < keys.length; i++) {
-    obj[keys[i]] = results[i][0]
+    obj[keys[i]] = results[i].value
   }
 
-  return ok(obj) as any
+  return ok(obj) as SafeResult<Values, Err>
 }
 
 /**
@@ -508,6 +511,8 @@ async function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
 async function safeAllSettled<T extends Record<string, Promise<SafeResult<any, any>>>>(
   promises: T
 ): Promise<{ [K in keyof T]: Awaited<T[K]> }> {
+  type Settled = { [K in keyof T]: Awaited<T[K]> }
+
   const keys = Object.keys(promises)
   const values = Object.values(promises)
   const results = await Promise.all(values)
@@ -517,7 +522,7 @@ async function safeAllSettled<T extends Record<string, Promise<SafeResult<any, a
     obj[keys[i]] = results[i]
   }
 
-  return obj as any
+  return obj as Settled
 }
 
 export const safe = {
