@@ -1,0 +1,25 @@
+{
+  "name": "@cometloop/safe",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint \"**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@core/eslint-config": "workspace:*",
+    "@core/typescript-config": "workspace:*",
+    "@vitest/coverage-v8": "^4.0.16",
+    "@vitest/ui": "^4.0.16",
+    "eslint": "^8.57.0",
+    "typescript": "5.5.4",
+    "vitest": "^4.0.16"
+  }
+}
