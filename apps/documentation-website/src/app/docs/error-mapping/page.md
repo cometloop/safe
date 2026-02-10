@@ -115,14 +115,16 @@ const dbSafe = createSafe({
   parseError: (e) => ({
     code: e instanceof Error ? e.name : 'UNKNOWN',
     message: e instanceof Error ? e.message : String(e),
-    timestamp: new Date(),
   }),
-  defaultError: { code: 'UNKNOWN', message: 'Unknown error', timestamp: new Date() },
+  defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
 })
 
 // All operations use the same error mapper
-const [user, error] = await dbSafe.async(() => db.user.findById(id))
-const [order, error2] = await dbSafe.async(() => db.order.findById(orderId))
+const safeFindUser = dbSafe.wrapAsync(db.user.findById.bind(db.user))
+const safeFindOrder = dbSafe.wrapAsync(db.order.findById.bind(db.order))
+
+const [user, error] = await safeFindUser(id)
+const [order, error2] = await safeFindOrder(orderId)
 ```
 
 {% callout title="TypeScript inference" type="note" %}

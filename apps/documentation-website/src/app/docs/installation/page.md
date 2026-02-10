@@ -29,44 +29,33 @@ yarn add @cometloop/safe
 ## Import
 
 ```ts
-import { safe, createSafe, TimeoutError } from '@cometloop/safe'
+// Core utilities
+import { safe, createSafe } from '@cometloop/safe'
+
+// Result constructors (for building SafeResult values manually)
+import { ok, err } from '@cometloop/safe'
+
+// Error class
+import { TimeoutError } from '@cometloop/safe'
+
+// Types
+import type { SafeResult, SafeOk, SafeErr, SafeHooks, SafeAsyncHooks,
+  RetryConfig, CreateSafeConfig, SafeInstance, NonFalsy } from '@cometloop/safe'
 ```
 
-The library exports three main items:
+**Key exports:**
 
-- **`safe`** — the core utility with `sync`, `async`, `wrap`, and `wrapAsync` methods
-- **`createSafe`** — a factory function for creating pre-configured safe instances
+- **`safe`** — core utility with `sync`, `async`, `wrap`, `wrapAsync`, `all`, and `allSettled` methods
+- **`createSafe`** — factory function for creating pre-configured safe instances
+- **`ok`** / **`err`** — construct `SafeResult` values manually
 - **`TimeoutError`** — error class thrown when an operation exceeds its timeout
-
----
-
-## Project structure
-
-The safe module is organized into separate files for maintainability:
-
-```text
-src/
-├── index.ts              # Main entry point (re-exports all)
-└── safe/
-    ├── index.ts          # Barrel exports
-    ├── types.ts          # Type definitions
-    ├── safe.ts           # Core functions (sync, async, wrap, wrapAsync)
-    ├── createSafe.ts     # Factory function for pre-configured instances
-    ├── safe.test.ts      # Tests for core functions (345 tests)
-    └── createSafe.test.ts # Tests for factory function (180 tests)
-```
-
-| File | Description |
-| --- | --- |
-| `types.ts` | Type definitions: `SafeResult`, `SafeHooks`, `SafeAsyncHooks`, `RetryConfig`, `TimeoutError`, `CreateSafeConfig`, `SafeInstance` |
-| `safe.ts` | Core safe utilities: `sync`, `async`, `wrap`, `wrapAsync` with retry and timeout support |
-| `createSafe.ts` | Factory function for creating pre-configured safe instances |
-| `index.ts` | Barrel file that re-exports everything |
+- **Types** — `SafeResult`, `SafeOk`, `SafeErr`, `SafeHooks`, `SafeAsyncHooks`, `RetryConfig`, `CreateSafeConfig`, `SafeInstance`, `NonFalsy`
 
 ---
 
 ## Next steps
 
-- [safe.sync](/docs/safe-sync) — synchronous error handling
-- [safe.async](/docs/safe-async) — asynchronous error handling
+- [safe.wrap](/docs/safe-wrap) — wrap sync functions to return SafeResult
+- [safe.wrapAsync](/docs/safe-wrap-async) — wrap async functions to return SafeResult
+- [createSafe](/docs/create-safe) — factory for pre-configured instances
 - [Types](/docs/types) — full type reference

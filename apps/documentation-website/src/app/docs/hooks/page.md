@@ -159,16 +159,22 @@ const [length, error] = safe.sync(
 
 ### Error handling
 
-If `parseResult` throws, the error is caught and processed through `parseError`. For async operations with retry, a `parseResult` throw counts as a failure and triggers retry logic.
+If `parseResult` throws, the error is routed through the standard error path — just like any error thrown by the wrapped function. It goes through `parseError` (if provided), triggers `onError` and `onSettled`, and returns `[null, error]`.
 
 ```ts
 const [data, error] = safe.sync(
-  () => '{"valid": true}',
-  (e) => ({ code: 'PARSE_ERROR', message: String(e) }),
+  () => 42,
+  (e) => ({ code: 'TRANSFORM_FAILED', message: String(e) }),
   {
-    parseResult: (raw) => JSON.parse(raw),
+    parseResult: (n) => {
+      throw new Error('transform failed')
+    },
+    onError: (err) => {
+      // err is { code: 'TRANSFORM_FAILED', message: 'Error: transform failed' }
+    },
   }
 )
+// data is null, error is { code: 'TRANSFORM_FAILED', message: '...' }
 ```
 
 {% callout title="parseResult vs hooks" type="note" %}

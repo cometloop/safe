@@ -28,6 +28,21 @@ export type SafeErr<E> = readonly [null, E] & {
 
 export type SafeResult<T, E = Error> = SafeOk<T> | SafeErr<E>
 
+// Object-style result types
+export type SafeOkObj<T> = {
+  readonly ok: true
+  readonly data: T
+  readonly error: null
+}
+
+export type SafeErrObj<E> = {
+  readonly ok: false
+  readonly data: null
+  readonly error: E
+}
+
+export type SafeResultObj<T, E = Error> = SafeOkObj<T> | SafeErrObj<E>
+
 // Construct a success result
 export function ok<T>(value: T): SafeOk<T> {
   const tuple = [value, null] as readonly [T, null]
@@ -48,6 +63,16 @@ export function err<E>(error: E): SafeErr<E> {
     error: { value: error, enumerable: false },
   })
   return tuple as SafeErr<E>
+}
+
+// Construct a success object result
+export function okObj<T>(data: T): SafeOkObj<T> {
+  return { ok: true, data, error: null }
+}
+
+// Construct an error object result
+export function errObj<E>(error: E): SafeErrObj<E> {
+  return { ok: false, data: null, error }
 }
 
 // Timeout error class for abortAfter functionality
@@ -159,6 +184,45 @@ export type SafeInstance<E, TResult = never> = {
     fns: T
   ) => Promise<{
     [K in keyof T]: SafeResult<
+      [TResult] extends [never]
+        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
+        : TResult,
+      E
+    >
+  }>
+}
+
+/**
+ * Object-style variant of SafeInstance where all methods return SafeResultObj instead of SafeResult tuples.
+ * Created by wrapping a SafeInstance with withObjects().
+ */
+export type SafeObjectInstance<E, TResult = never> = {
+  sync: <T, TOut = [TResult] extends [never] ? T : TResult>(
+    fn: () => T,
+    hooks?: SafeHooks<T, E, [], TOut>
+  ) => SafeResultObj<TOut, E>
+  async: <T, TOut = [TResult] extends [never] ? T : TResult>(
+    fn: (signal?: AbortSignal) => Promise<T>,
+    hooks?: SafeAsyncHooks<T, E, [], TOut>
+  ) => Promise<SafeResultObj<TOut, E>>
+  wrap: <TArgs extends unknown[], T, TOut = [TResult] extends [never] ? T : TResult>(
+    fn: (...args: TArgs) => T,
+    hooks?: SafeHooks<T, E, TArgs, TOut>
+  ) => (...args: TArgs) => SafeResultObj<TOut, E>
+  wrapAsync: <TArgs extends unknown[], T, TOut = [TResult] extends [never] ? T : TResult>(
+    fn: (...args: TArgs) => Promise<T>,
+    hooks?: SafeAsyncHooks<T, E, TArgs, TOut>
+  ) => (...args: TArgs) => Promise<SafeResultObj<TOut, E>>
+  all: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(fns: T) => Promise<
+    SafeResultObj<
+      { [K in keyof T]: [TResult] extends [never]
+        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
+        : TResult },
+      E
+    >
+  >
+  allSettled: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(fns: T) => Promise<{
+    [K in keyof T]: SafeResultObj<
       [TResult] extends [never]
         ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
         : TResult,

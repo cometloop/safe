@@ -2611,32 +2611,26 @@ describe('safe', () => {
         expect(onSettled).toHaveBeenCalledWith(5, null, [])
       })
 
-      it('returns raw result when parseResult throws', () => {
-        const onHookError = vi.fn()
+      it('returns error when parseResult throws', () => {
         const result = safe.sync(() => 'not json', {
           parseResult: (raw) => JSON.parse(raw),
-          onHookError,
         })
 
-        expect(result[0]).toBe('not json')
-        expect(result[1]).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(SyntaxError), 'parseResult')
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(SyntaxError)
       })
 
-      it('returns raw result when parseResult throws (with parseError)', () => {
-        const onHookError = vi.fn()
+      it('returns parsed error when parseResult throws (with parseError)', () => {
         const result = safe.sync(
           () => 'invalid',
           (e) => ({ code: 'PARSE_FAIL', msg: e instanceof Error ? e.message : 'unknown' }),
           {
             parseResult: () => { throw new Error('validation failed') },
-            onHookError,
           },
         )
 
-        expect(result[0]).toBe('invalid')
-        expect(result[1]).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+        expect(result[0]).toBeNull()
+        expect(result[1]).toEqual({ code: 'PARSE_FAIL', msg: 'validation failed' })
       })
 
       it('parseResult is not called on error path', () => {
@@ -2690,49 +2684,40 @@ describe('safe', () => {
         expect(onSuccess).toHaveBeenCalledWith(15, [])
       })
 
-      it('returns raw result when parseResult throws', async () => {
-        const onHookError = vi.fn()
+      it('returns error when parseResult throws', async () => {
         const result = await safe.async(() => Promise.resolve('bad json'), {
           parseResult: (raw) => JSON.parse(raw),
-          onHookError,
         })
 
-        expect(result[0]).toBe('bad json')
-        expect(result[1]).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(SyntaxError), 'parseResult')
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(SyntaxError)
       })
 
-      it('returns raw result when parseResult throws (with parseError)', async () => {
-        const onHookError = vi.fn()
+      it('returns parsed error when parseResult throws (with parseError)', async () => {
         const result = await safe.async(
           () => Promise.resolve('data'),
           (e) => ({ code: 'FAIL', msg: e instanceof Error ? e.message : 'unknown' }),
           {
             parseResult: () => { throw new Error('bad data') },
-            onHookError,
           },
         )
 
-        expect(result[0]).toBe('data')
-        expect(result[1]).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+        expect(result[0]).toBeNull()
+        expect(result[1]).toEqual({ code: 'FAIL', msg: 'bad data' })
       })
 
-      it('parseResult throw does not trigger retry', async () => {
+      it('parseResult throw triggers retry', async () => {
         const fn = vi.fn().mockResolvedValue('data')
-        const onHookError = vi.fn()
 
         const result = await safe.async(fn, {
           parseResult: () => { throw new Error('always fails') },
           retry: { times: 3 },
-          onHookError,
         })
 
-        // parseResult failure is isolated — fn is not retried
-        expect(fn).toHaveBeenCalledTimes(1)
-        expect(result[0]).toBe('data')
-        expect(result[1]).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+        // parseResult failure goes through the error path and triggers retries
+        expect(fn).toHaveBeenCalledTimes(4)
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
       })
     })
 
@@ -2770,21 +2755,19 @@ describe('safe', () => {
         expect(onSettled).toHaveBeenCalledWith(true, null, [5])
       })
 
-      it('returns raw result when parseResult throws', () => {
-        const onHookError = vi.fn()
+      it('returns error when parseResult throws', () => {
         const safeFn = safe.wrap(
           (x: number) => x,
           {
             parseResult: () => { throw new Error('transform failed') },
-            onHookError,
           },
         )
 
         const result = safeFn(42)
 
-        expect(result[0]).toBe(42)
-        expect(result[1]).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('transform failed')
       })
 
       it('multiple calls each transform independently', () => {
@@ -2819,39 +2802,35 @@ describe('safe', () => {
         expect(onSuccess).toHaveBeenCalledWith('User 42', [42])
       })
 
-      it('returns raw result when parseResult throws', async () => {
-        const onHookError = vi.fn()
+      it('returns error when parseResult throws', async () => {
         const safeFn = safe.wrapAsync(
           async (id: number) => ({ id }),
           {
             parseResult: () => { throw new Error('transform failed') },
-            onHookError,
           },
         )
 
         const result = await safeFn(1)
 
-        expect(result[0]).toEqual({ id: 1 })
-        expect(result[1]).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+        expect((result[1] as Error).message).toBe('transform failed')
       })
 
-      it('parseResult throw does not trigger retry', async () => {
+      it('parseResult throw triggers retry', async () => {
         const fn = vi.fn().mockResolvedValue({ id: 42 })
-        const onHookError = vi.fn()
 
         const safeFn = safe.wrapAsync(fn, {
           parseResult: () => { throw new Error('not valid yet') },
           retry: { times: 2 },
-          onHookError,
         })
 
         const result = await safeFn(42)
 
-        // parseResult failure is isolated — fn is not retried
-        expect(fn).toHaveBeenCalledTimes(1)
-        expect(result[0]).toEqual({ id: 42 })
-        expect(result[1]).toBeNull()
+        // parseResult failure goes through the error path and triggers retries
+        expect(fn).toHaveBeenCalledTimes(3)
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
       })
     })
 
@@ -5156,42 +5135,37 @@ describe('safe', () => {
       })
     })
 
-    describe('parseResult throwing reports via onHookError, not onError', () => {
-      it('onError is NOT called when parseResult throws in sync', () => {
+    describe('parseResult throwing goes through the error path', () => {
+      it('onError IS called when parseResult throws in sync', () => {
         const onError = vi.fn()
-        const onHookError = vi.fn()
         const parseResultError = new Error('parseResult blew up')
 
         const result = safe.sync(() => 'data', {
           parseResult: () => { throw parseResultError },
           onError,
-          onHookError,
         })
 
-        expect(onError).not.toHaveBeenCalled()
-        expect(onHookError).toHaveBeenCalledWith(parseResultError, 'parseResult')
-        expect(result[0]).toBe('data')
+        expect(onError).toHaveBeenCalledWith(parseResultError, [])
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(parseResultError)
       })
 
-      it('onError is NOT called when parseResult throws in async', async () => {
+      it('onError IS called when parseResult throws in async', async () => {
         const onError = vi.fn()
-        const onHookError = vi.fn()
         const parseResultError = new Error('parseResult blew up')
 
         const result = await safe.async(() => Promise.resolve('data'), {
           parseResult: () => { throw parseResultError },
           onError,
-          onHookError,
         })
 
-        expect(onError).not.toHaveBeenCalled()
-        expect(onHookError).toHaveBeenCalledWith(parseResultError, 'parseResult')
-        expect(result[0]).toBe('data')
+        expect(onError).toHaveBeenCalledWith(parseResultError, [])
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBe(parseResultError)
       })
 
-      it('onHookError receives parseResult error even with parseError provided', () => {
+      it('parseError transforms parseResult error when provided', () => {
         const onError = vi.fn()
-        const onHookError = vi.fn()
 
         const result = safe.sync(
           () => 'data',
@@ -5199,14 +5173,12 @@ describe('safe', () => {
           {
             parseResult: () => { throw new Error('transform failed') },
             onError,
-            onHookError,
-            defaultError: { code: 'DEFAULT', msg: 'default' },
           },
         )
 
-        expect(onError).not.toHaveBeenCalled()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
-        expect(result[0]).toBe('data')
+        expect(onError).toHaveBeenCalledWith({ code: 'MAPPED', msg: 'transform failed' }, [])
+        expect(result[0]).toBeNull()
+        expect(result[1]).toEqual({ code: 'MAPPED', msg: 'transform failed' })
       })
     })
 
@@ -5387,6 +5359,309 @@ describe('safe', () => {
         )
 
         expect(result[1]).toBeInstanceOf(Error)
+      })
+    })
+
+    describe('isHooks with undefined hook values (lines 38-40)', () => {
+      it('treats { onSuccess: undefined } as hooks, not parseError', () => {
+        const result = safe.sync(() => 42, { onSuccess: undefined })
+
+        expect(result).toEqual([42, null])
+        expect(result.ok).toBe(true)
+      })
+
+      it('treats { onError: undefined, onSettled: undefined } as hooks', () => {
+        const result = safe.sync(
+          () => { throw new Error('fail') },
+          { onError: undefined, onSettled: undefined },
+        )
+
+        expect(result[0]).toBeNull()
+        expect(result[1]).toBeInstanceOf(Error)
+      })
+
+      it('treats { onSuccess: undefined, onHookError: undefined } as hooks in async', async () => {
+        const result = await safe.async(
+          () => Promise.resolve('ok'),
+          { onSuccess: undefined, onHookError: undefined },
+        )
+
+        expect(result).toEqual(['ok', null])
+      })
+
+      it('treats { retry: undefined } as hooks (non-function key with undefined value)', async () => {
+        const result = await safe.async(
+          () => Promise.resolve(99),
+          { retry: undefined } as any,
+        )
+
+        expect(result).toEqual([99, null])
+      })
+    })
+
+    describe('callHook: onHookError itself throws (line 65)', () => {
+      it('swallows onHookError exception on error path in sync', () => {
+        const result = safe.sync(
+          () => { throw new Error('original') },
+          {
+            onError: () => { throw new Error('onError broke') },
+            onHookError: () => { throw new Error('onHookError also broke') },
+          },
+        )
+
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('swallows onHookError exception on error path in async', async () => {
+        const result = await safe.async(
+          () => Promise.reject(new Error('original')),
+          {
+            onError: () => { throw new Error('onError broke') },
+            onHookError: () => { throw new Error('onHookError also broke') },
+          },
+        )
+
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('swallows onHookError exception when onSettled throws on success path', () => {
+        const result = safe.sync(() => 42, {
+          onSettled: () => { throw new Error('onSettled broke') },
+          onHookError: () => { throw new Error('onHookError also broke') },
+        })
+
+        expect(result).toEqual([42, null])
+      })
+
+      it('swallows onHookError exception when onSettled throws on error path', () => {
+        const result = safe.sync(
+          () => { throw new Error('original') },
+          {
+            onSettled: () => { throw new Error('onSettled broke') },
+            onHookError: () => { throw new Error('onHookError also broke') },
+          },
+        )
+
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('swallows onHookError exception in wrap', () => {
+        const wrapped = safe.wrap(
+          () => { throw new Error('original') },
+          {
+            onError: () => { throw new Error('onError broke') },
+            onHookError: () => { throw new Error('onHookError also broke') },
+          },
+        )
+        const result = wrapped()
+
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+
+      it('swallows onHookError exception in wrapAsync', async () => {
+        const wrapped = safe.wrapAsync(
+          async () => { throw new Error('original') },
+          {
+            onError: () => { throw new Error('onError broke') },
+            onHookError: () => { throw new Error('onHookError also broke') },
+          },
+        )
+        const result = await wrapped()
+
+        expect(result[0]).toBeNull()
+        expect((result[1] as Error).message).toBe('original')
+      })
+    })
+
+    describe('safeAll rejection handler safety-net (line 590)', () => {
+      it('catches a raw rejection from a non-safe-wrapped promise', async () => {
+        const [data, error] = await safe.all({
+          good: safe.async(() => Promise.resolve('ok')),
+          bad: Promise.reject(new Error('raw rejection')) as any,
+        })
+
+        expect(data).toBeNull()
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toBe('raw rejection')
+      })
+
+      it('handles rejection after done flag is already set', async () => {
+        vi.useFakeTimers()
+
+        const resultPromise = safe.all({
+          // This one errors immediately via SafeResult
+          fast: safe.async(() => Promise.reject(new Error('safe error'))),
+          // This one rejects as a raw promise after a delay
+          slow: new Promise<any>((_, reject) => {
+            setTimeout(() => reject(new Error('late raw rejection')), 100)
+          }),
+        })
+
+        await vi.advanceTimersByTimeAsync(0)
+        const [data, error] = await resultPromise
+
+        // First error wins
+        expect(data).toBeNull()
+        expect((error as Error).message).toBe('safe error')
+
+        // Advance so the slow rejection fires — should not crash
+        await vi.advanceTimersByTimeAsync(100)
+
+        vi.useRealTimers()
+      })
+
+      it('wraps non-Error raw rejections via toError', async () => {
+        const [data, error] = await safe.all({
+          bad: Promise.reject(42) as any,
+        })
+
+        expect(data).toBeNull()
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toBe('42')
+        expect((error as any).cause).toBe(42)
+      })
+    })
+
+    describe('concurrent safeAll with mixed error types', () => {
+      it('returns the error from whichever operation settles first', async () => {
+        vi.useFakeTimers()
+
+        const resultPromise = safe.all({
+          // Fails fast with a TypeError
+          a: safe.async(() => new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new TypeError('type error')), 10)
+          )),
+          // Fails slower with a RangeError
+          b: safe.async(() => new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new RangeError('range error')), 100)
+          )),
+          // Succeeds very late
+          c: safe.async(() => new Promise<string>(resolve =>
+            setTimeout(() => resolve('done'), 500)
+          )),
+        })
+
+        await vi.advanceTimersByTimeAsync(10)
+        const [data, error] = await resultPromise
+
+        expect(data).toBeNull()
+        expect(error).toBeInstanceOf(TypeError)
+        expect((error as Error).message).toBe('type error')
+
+        vi.useRealTimers()
+      })
+
+      it('returns first safe-result error when mixed with raw rejections', async () => {
+        vi.useFakeTimers()
+
+        const resultPromise = safe.all({
+          // SafeResult error arrives first
+          a: safe.async(() => Promise.reject(new Error('safe error'))),
+          // Raw rejection arrives later
+          b: new Promise<any>((_, reject) =>
+            setTimeout(() => reject(new Error('raw rejection')), 100)
+          ),
+        })
+
+        await vi.advanceTimersByTimeAsync(0)
+        const [data, error] = await resultPromise
+
+        expect(data).toBeNull()
+        expect((error as Error).message).toBe('safe error')
+
+        await vi.advanceTimersByTimeAsync(100)
+        vi.useRealTimers()
+      })
+    })
+
+    describe('retry with waitBefore returning negative/NaN/Infinity via wrapAsync', () => {
+      it('waitBefore returning negative skips the wait', async () => {
+        let attempts = 0
+        const wrapped = safe.wrapAsync(
+          async () => {
+            attempts++
+            if (attempts < 2) throw new Error('fail')
+            return 'done'
+          },
+          { retry: { times: 1, waitBefore: () => -100 } },
+        )
+
+        const [value, error] = await wrapped()
+        expect(value).toBe('done')
+        expect(error).toBeNull()
+        expect(attempts).toBe(2)
+      })
+
+      it('waitBefore returning NaN skips the wait', async () => {
+        let attempts = 0
+        const wrapped = safe.wrapAsync(
+          async () => {
+            attempts++
+            if (attempts < 2) throw new Error('fail')
+            return 'done'
+          },
+          { retry: { times: 1, waitBefore: () => NaN } },
+        )
+
+        const [value, error] = await wrapped()
+        expect(value).toBe('done')
+        expect(error).toBeNull()
+        expect(attempts).toBe(2)
+      })
+
+      it('waitBefore returning Infinity skips the wait', async () => {
+        let attempts = 0
+        const wrapped = safe.wrapAsync(
+          async () => {
+            attempts++
+            if (attempts < 2) throw new Error('fail')
+            return 'done'
+          },
+          { retry: { times: 1, waitBefore: () => Infinity } },
+        )
+
+        const [value, error] = await wrapped()
+        expect(value).toBe('done')
+        expect(error).toBeNull()
+        expect(attempts).toBe(2)
+      })
+
+      it('waitBefore returning -Infinity skips the wait', async () => {
+        let attempts = 0
+        const wrapped = safe.wrapAsync(
+          async () => {
+            attempts++
+            if (attempts < 2) throw new Error('fail')
+            return 'done'
+          },
+          { retry: { times: 1, waitBefore: () => -Infinity } },
+        )
+
+        const [value, error] = await wrapped()
+        expect(value).toBe('done')
+        expect(error).toBeNull()
+        expect(attempts).toBe(2)
+      })
+
+      it('waitBefore returning 0 skips the wait', async () => {
+        let attempts = 0
+        const wrapped = safe.wrapAsync(
+          async () => {
+            attempts++
+            if (attempts < 2) throw new Error('fail')
+            return 'done'
+          },
+          { retry: { times: 1, waitBefore: () => 0 } },
+        )
+
+        const [value, error] = await wrapped()
+        expect(value).toBe('done')
+        expect(error).toBeNull()
+        expect(attempts).toBe(2)
       })
     })
   })

@@ -7,12 +7,19 @@ export const navigation = [
     ],
   },
   {
+    title: 'Best practices',
+    links: [
+      { title: 'Recommended patterns', href: '/docs/recommended-patterns' },
+      { title: "What if I don't like tuples?", href: '/docs/object-results' },
+    ],
+  },
+  {
     title: 'Core API',
     links: [
-      { title: 'safe.sync', href: '/docs/safe-sync' },
-      { title: 'safe.async', href: '/docs/safe-async' },
       { title: 'safe.wrap', href: '/docs/safe-wrap' },
       { title: 'safe.wrapAsync', href: '/docs/safe-wrap-async' },
+      { title: 'safe.sync', href: '/docs/safe-sync' },
+      { title: 'safe.async', href: '/docs/safe-async' },
       { title: 'safe.all', href: '/docs/safe-all' },
       { title: 'safe.allSettled', href: '/docs/safe-all-settled' },
       { title: 'createSafe', href: '/docs/create-safe' },
@@ -37,6 +44,7 @@ export const navigation = [
   {
     title: 'Examples',
     links: [
+      { title: 'Interactive demo', href: '/docs/interactive-demo' },
       { title: 'Real-world examples', href: '/docs/real-world-examples' },
       { title: 'createSafe examples', href: '/docs/create-safe-examples' },
       { title: 'Comparison with try-catch', href: '/docs/comparison' },

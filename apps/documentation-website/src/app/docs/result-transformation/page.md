@@ -134,6 +134,7 @@ const validatedSafe = createSafe({
     code: 'ERROR',
     message: e instanceof Error ? e.message : String(e),
   }),
+  defaultError: { code: 'ERROR', message: 'Unknown error' },
   parseResult: (result) => userSchema.parse(result),
 })
 
@@ -192,40 +193,28 @@ safe.sync(
 
 ## Error handling
 
-If `parseResult` throws, the error is caught and processed through `parseError`:
+If `parseResult` throws, the error is routed through the standard error path — just like any error thrown by the wrapped function. It goes through `parseError` (if provided), triggers `onError` and `onSettled`, and returns `[null, error]`:
 
 ```ts
 const [data, error] = safe.sync(
   () => '{"valid": false}',
-  (e) => ({ code: 'VALIDATION_ERROR', message: String(e) }),
+  (e) => ({ code: 'TRANSFORM_FAILED', message: String(e) }),
   {
     parseResult: (raw) => {
-      const parsed = JSON.parse(raw)
-      if (!parsed.valid) throw new Error('Invalid data')
-      return parsed
+      throw new Error('transform failed')
+    },
+    onError: (err) => {
+      console.warn('parseResult threw:', err)
     },
   }
 )
-// error is { code: 'VALIDATION_ERROR', message: 'Invalid data' }
+// data is null
+// error is { code: 'TRANSFORM_FAILED', message: '...' }
 ```
 
-For async operations with retry, a `parseResult` throw counts as a failure and triggers the retry logic:
-
-```ts
-const [data, error] = await safe.async(
-  () => fetchFlaky(),
-  {
-    parseResult: (raw) => {
-      if (!raw.ready) throw new Error('Not ready yet')
-      return raw.data
-    },
-    retry: { times: 3 },
-    onRetry: (error, attempt) => {
-      console.log(`Attempt ${attempt} — result not ready, retrying...`)
-    },
-  }
-)
-```
+{% callout title="parseResult errors are real errors" type="warning" %}
+A `parseResult` that throws is treated the same as the wrapped function throwing. The error flows through `parseError`, `onError`, and `onSettled`, and the result tuple will be `[null, error]`. With async operations, a throwing `parseResult` will also trigger retries if configured.
+{% /callout %}
 
 ---
 
@@ -250,6 +239,7 @@ With `createSafe`, the factory `parseResult` return type becomes the default `TR
 ```ts
 const appSafe = createSafe({
   parseError: (e) => String(e),
+  defaultError: 'unknown error',
   parseResult: (result) => ({ wrapped: result }),
 })
 

@@ -2464,8 +2464,7 @@ describe('createSafe', () => {
     })
 
     describe('parseResult error handling', () => {
-      it('factory parseResult throw returns raw result and reports via onHookError', () => {
-        const onHookError = vi.fn()
+      it('factory parseResult throw returns error through error path', () => {
         const appSafe = createSafe({
           parseError: (e) => ({
             code: 'PARSE_ERROR',
@@ -2474,24 +2473,20 @@ describe('createSafe', () => {
           parseResult: () => {
             throw new Error('validation failed')
           },
-          onHookError,
         })
 
         const [result, error] = appSafe.sync(() => 42)
 
-        expect(result).toBe(42)
-        expect(error).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+        expect(result).toBeNull()
+        expect(error).toEqual({ code: 'PARSE_ERROR', message: 'validation failed' })
       })
 
-      it('per-call parseResult throw returns raw result and reports via onHookError', () => {
-        const onHookError = vi.fn()
+      it('per-call parseResult throw returns error through error path', () => {
         const appSafe = createSafe({
           parseError: (e) => ({
             code: 'PARSE_ERROR',
             message: e instanceof Error ? e.message : 'Unknown',
           }),
-          onHookError,
         })
 
         const [result, error] = appSafe.sync(() => 42, {
@@ -2500,29 +2495,25 @@ describe('createSafe', () => {
           },
         })
 
-        expect(result).toBe(42)
-        expect(error).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+        expect(result).toBeNull()
+        expect(error).toEqual({ code: 'PARSE_ERROR', message: 'per-call validation failed' })
       })
 
-      it('factory parseResult throw does not trigger retry on async', async () => {
+      it('factory parseResult throw triggers retry on async', async () => {
         const fn = vi.fn().mockResolvedValue('data')
-        const onHookError = vi.fn()
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
           parseResult: () => { throw new Error('not ready') },
           retry: { times: 3 },
-          onHookError,
         })
 
         const [result, error] = await appSafe.async(fn)
 
-        // parseResult failure is isolated — fn is not retried
-        expect(fn).toHaveBeenCalledTimes(1)
-        expect(result).toBe('data')
-        expect(error).toBeNull()
-        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+        // parseResult failure goes through error path and triggers retries
+        expect(fn).toHaveBeenCalledTimes(4)
+        expect(result).toBeNull()
+        expect(error).toBe('Error: not ready')
       })
 
       it('parseResult not called on error path', () => {
@@ -2791,16 +2782,13 @@ describe('createSafe', () => {
       expect(data).toEqual({ only: 'solo' })
     })
 
-    it('parseResult throwing returns raw values in all()', async () => {
-      const onHookError = vi.fn()
+    it('parseResult throwing returns error in all()', async () => {
       const appSafe = createSafe({
         parseError: (e) => ({
           code: 'PARSE_RESULT_ERROR' as const,
           message: e instanceof Error ? e.message : 'unknown',
         }),
         parseResult: () => { throw new Error('parseResult exploded') },
-        defaultError: { code: 'PARSE_RESULT_ERROR' as const, message: 'default' },
-        onHookError,
       })
 
       const [data, error] = await appSafe.all({
@@ -2808,9 +2796,8 @@ describe('createSafe', () => {
         b: () => Promise.resolve(2),
       })
 
-      expect(error).toBeNull()
-      expect(data).toEqual({ a: 1, b: 2 })
-      expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+      expect(data).toBeNull()
+      expect(error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
     })
 
     it('handles a function that throws synchronously (before returning a promise)', async () => {
@@ -2962,16 +2949,13 @@ describe('createSafe', () => {
       expect(results.only.value).toBe('solo')
     })
 
-    it('parseResult throwing returns raw values in allSettled()', async () => {
-      const onHookError = vi.fn()
+    it('parseResult throwing returns errors in allSettled()', async () => {
       const appSafe = createSafe({
         parseError: (e) => ({
           code: 'PARSE_RESULT_ERROR' as const,
           message: e instanceof Error ? e.message : 'unknown',
         }),
         parseResult: () => { throw new Error('parseResult exploded') },
-        defaultError: { code: 'PARSE_RESULT_ERROR' as const, message: 'default' },
-        onHookError,
       })
 
       const results = await appSafe.allSettled({
@@ -2979,11 +2963,10 @@ describe('createSafe', () => {
         b: () => Promise.resolve(2),
       })
 
-      expect(results.a.ok).toBe(true)
-      expect(results.a.value).toBe(1)
-      expect(results.b.ok).toBe(true)
-      expect(results.b.value).toBe(2)
-      expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
+      expect(results.a.ok).toBe(false)
+      expect(results.a.error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
+      expect(results.b.ok).toBe(false)
+      expect(results.b.error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
     })
   })
 

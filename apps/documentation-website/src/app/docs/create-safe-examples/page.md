@@ -17,7 +17,6 @@ import * as Sentry from '@sentry/node'
 type AppError = {
   code: string
   message: string
-  timestamp: Date
   requestId?: string
   stack?: string
 }
@@ -28,14 +27,12 @@ export const appSafe = createSafe({
     return {
       code: error.name === 'Error' ? 'UNKNOWN_ERROR' : error.name,
       message: error.message,
-      timestamp: new Date(),
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     }
   },
   defaultError: {
     code: 'UNKNOWN_ERROR',
     message: 'An unknown error occurred',
-    timestamp: new Date(),
   },
   onSuccess: (result) => {
     metrics.increment('operation.success')
@@ -44,7 +41,6 @@ export const appSafe = createSafe({
     logger.error('Operation failed', {
       code: error.code,
       message: error.message,
-      timestamp: error.timestamp,
     })
 
     Sentry.captureException(new Error(error.message), {
@@ -55,9 +51,12 @@ export const appSafe = createSafe({
   },
 })
 
-// Usage throughout your application
-const [user, error] = await appSafe.async(() => userService.findById(id))
-const [config, parseError] = appSafe.sync(() => JSON.parse(configString))
+// Wrap functions for reuse throughout your application
+const safeFindUser = appSafe.wrapAsync(userService.findById.bind(userService))
+const safeJsonParse = appSafe.wrap(JSON.parse)
+
+const [user, error] = await safeFindUser(id)
+const [config, parseError] = safeJsonParse(configString)
 ```
 
 ---
@@ -352,7 +351,6 @@ type TenantError = {
   code: string
   message: string
   tenantId: string
-  timestamp: Date
 }
 
 function createTenantSafe(tenantId: string): SafeInstance<TenantError> {
@@ -361,13 +359,11 @@ function createTenantSafe(tenantId: string): SafeInstance<TenantError> {
       code: e instanceof Error ? e.name : 'UNKNOWN',
       message: e instanceof Error ? e.message : String(e),
       tenantId,
-      timestamp: new Date(),
     }),
     defaultError: {
       code: 'UNKNOWN',
       message: 'Unknown error',
       tenantId,
-      timestamp: new Date(),
     },
     onSuccess: () => {
       metrics.increment('tenant.operation.success', { tenantId })
@@ -393,17 +389,18 @@ class TenantContext {
     this.safe = createTenantSafe(tenantId)
   }
 
-  getUsers = () =>
-    this.safe.async(() =>
-      db.users.findMany({ where: { tenantId: this.tenantId } })
-    )
+  private async _getUsers() {
+    return db.users.findMany({ where: { tenantId: this.tenantId } })
+  }
 
-  createDocument = (data: CreateDocumentDto) =>
-    this.safe.async(() =>
-      db.documents.create({
-        data: { ...data, tenantId: this.tenantId },
-      })
-    )
+  private async _createDocument(data: CreateDocumentDto) {
+    return db.documents.create({
+      data: { ...data, tenantId: this.tenantId },
+    })
+  }
+
+  getUsers = this.safe.wrapAsync(this._getUsers.bind(this))
+  createDocument = this.safe.wrapAsync(this._createDocument.bind(this))
 }
 
 // Middleware creates tenant context per request

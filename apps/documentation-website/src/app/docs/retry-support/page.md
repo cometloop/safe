@@ -135,6 +135,7 @@ const apiSafe = createSafe({
     code: 'API_ERROR',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { code: 'API_ERROR', message: 'Unknown' },
   retry: {
     times: 3,
     waitBefore: (attempt) => attempt * 1000, // 1s, 2s, 3s
@@ -145,8 +146,10 @@ const apiSafe = createSafe({
 })
 
 // All async calls use the default retry config
-const [users, error] = await apiSafe.async(() => fetchUsers())
-const safeFetch = apiSafe.wrapAsync(fetchJson)
+const safeFetchUsers = apiSafe.wrapAsync(fetchUsers)
+const [users, error] = await safeFetchUsers()
+
+const safeFetchJson = apiSafe.wrapAsync(fetchJson)
 ```
 
 Per-call retry **completely overrides** the default:
@@ -194,11 +197,13 @@ const exponentialWithJitter = (attempt: number) => {
 const cappedExponential = (attempt: number) =>
   Math.min(Math.pow(2, attempt - 1) * 1000, 30000)
 
-// Usage
-const [data, error] = await safe.async(() => fetchData(), {
+// Usage with wrapAsync
+const safeFetchData = safe.wrapAsync(fetchData, {
   retry: { times: 5, waitBefore: exponentialWithJitter },
-  onRetry: (error, attempt, []) => {
+  onRetry: (error, attempt, args) => {
     console.log(`Retry ${attempt} after backoff`)
   },
 })
+
+const [data, error] = await safeFetchData()
 ```

@@ -99,24 +99,14 @@ const callParseError = <E>(
   }
 }
 
-// Safely call parseResult, falling back to the raw result if it throws.
-// A failing transformer should not turn a successful fn() call into an error.
+// Call parseResult, letting errors propagate to the caller's catch block
+// so they are routed through the standard error path (parseError → onError → err).
 const callParseResult = <T, TOut>(
   parseResult: ((response: T) => TOut) | undefined,
   rawResult: T,
-  onHookError?: (error: unknown, hookName: string) => void,
 ): TOut => {
   if (!parseResult) return rawResult as unknown as TOut
-  try {
-    return parseResult(rawResult)
-  } catch (e) {
-    try {
-      onHookError?.(e, 'parseResult')
-    } catch {
-      // onHookError itself must never throw
-    }
-    return rawResult as unknown as TOut
-  }
+  return parseResult(rawResult)
 }
 
 // Sanitise retry.times: floor to integer, clamp to >= 0, treat NaN as 0.
@@ -222,7 +212,7 @@ function safeSync<T, E = Error, TOut = T>(
 
   try {
     const rawResult = fn()
-    const result = callParseResult(resolvedHooks?.parseResult, rawResult, onHookError)
+    const result = callParseResult(resolvedHooks?.parseResult, rawResult)
     callHook(() => resolvedHooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
     callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
     return ok(result)
@@ -307,7 +297,7 @@ async function safeAsync<T, E = Error, TOut = T>(
       }
 
       const rawResult = await promise
-      const result = callParseResult(resolvedHooks?.parseResult, rawResult, onHookError)
+      const result = callParseResult(resolvedHooks?.parseResult, rawResult)
       callHook(() => resolvedHooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
       callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
       return ok(result)
@@ -393,7 +383,7 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
   return function (this: unknown, ...args: TArgs) {
     try {
       const rawResult = fn.call(this, ...args)
-      const result = callParseResult(resolvedHooks?.parseResult, rawResult, onHookError)
+      const result = callParseResult(resolvedHooks?.parseResult, rawResult)
       callHook(() => resolvedHooks?.onSuccess?.(result, args), onHookError, 'onSuccess')
       callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
       return ok(result)
@@ -502,7 +492,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
         }
 
         const rawResult = await promise
-        const result = callParseResult(resolvedHooks?.parseResult, rawResult, onHookError)
+        const result = callParseResult(resolvedHooks?.parseResult, rawResult)
         callHook(() => resolvedHooks?.onSuccess?.(result, args), onHookError, 'onSuccess')
         callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
         return ok(result)
