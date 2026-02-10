@@ -9,11 +9,13 @@ Executes an asynchronous function and returns a `Promise<SafeResult>` tuple. Sup
 ## Signatures
 
 ```ts
-safe.async<T>(fn: () => Promise<T>): Promise<SafeResult<T, Error>>
-safe.async<T>(fn: () => Promise<T>, hooks: SafeAsyncHooks<T, Error, []>): Promise<SafeResult<T, Error>>
-safe.async<T, E>(fn: () => Promise<T>, parseError: (e: unknown) => NonFalsy<E>): Promise<SafeResult<T, E>>
-safe.async<T, E>(fn: () => Promise<T>, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeAsyncHooks<T, E, []> & { defaultError: E }): Promise<SafeResult<T, E>>
+safe.async<T>(fn: (signal?: AbortSignal) => Promise<T>): Promise<SafeResult<T, Error>>
+safe.async<T>(fn: (signal?: AbortSignal) => Promise<T>, hooks: SafeAsyncHooks<T, Error, []>): Promise<SafeResult<T, Error>>
+safe.async<T, E>(fn: (signal?: AbortSignal) => Promise<T>, parseError: (e: unknown) => NonFalsy<E>): Promise<SafeResult<T, E>>
+safe.async<T, E>(fn: (signal?: AbortSignal) => Promise<T>, parseError: (e: unknown) => NonFalsy<E>, hooks: SafeAsyncHooks<T, E, []> & { defaultError: E }): Promise<SafeResult<T, E>>
 ```
+
+When `abortAfter` is configured, the function receives an `AbortSignal` as its first parameter for cooperative cancellation.
 
 {% callout title="Error normalization" type="note" %}
 When no `parseError` is provided, non-`Error` thrown values (strings, numbers, etc.) are automatically normalized to `Error` instances via `new Error(String(e))`. The original thrown value is preserved as `error.cause`.

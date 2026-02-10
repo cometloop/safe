@@ -27,6 +27,7 @@ type CreateSafeConfig<E, TResult = never> = {
   parseResult?: (result: unknown) => TResult // Optional: transforms successful results
   onSuccess?: (result: unknown) => void    // Optional: called on every success
   onError?: (error: E) => void             // Optional: called on every error
+  onSettled?: (result: unknown, error: E | null) => void // Optional: called after success or error
   onRetry?: (error: E, attempt: number) => void // Optional: called before each retry
   retry?: RetryConfig                      // Optional: default retry config (async only)
   abortAfter?: number                      // Optional: default timeout (async only)
@@ -60,13 +61,15 @@ const appSafe = createSafe({
   },
 })
 
-// All methods now return AppError on failure
-const [data, error] = appSafe.sync(() => JSON.parse(jsonString))
+// All methods now return AppError on failure — no need to pass parseError each time
+const safeJsonParse = appSafe.wrap(JSON.parse)
+const [data, error] = safeJsonParse(jsonString)
 if (error) {
   console.error(error.code, error.message) // error is typed as AppError
 }
 
-const [user, err] = await appSafe.async(() => fetchUser(id))
+const safeFetchUser = appSafe.wrapAsync(fetchUser)
+const [user, err] = await safeFetchUser(id)
 if (err) {
   console.error(err.code) // err is typed as AppError
 }
@@ -308,5 +311,5 @@ appSafe.sync(
 ```
 
 {% callout title="SafeInstance type" type="note" %}
-The returned instance has `sync`, `async`, `wrap`, and `wrapAsync` methods — all pre-configured with the error type. See [Types](/docs/types) for the full `SafeInstance<E>` definition.
+The returned instance has `sync`, `async`, `wrap`, `wrapAsync`, `all`, and `allSettled` methods — all pre-configured with the error type. The `all` and `allSettled` methods accept raw async functions (not pre-wrapped `Promise<SafeResult>` entries). See [Types](/docs/types) for the full `SafeInstance<E>` definition.
 {% /callout %}

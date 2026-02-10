@@ -47,14 +47,17 @@ async function processOrder(orderId: string) {
 
 ```ts
 // Benefits: typed errors, flat structure, explicit handling
+const safeFetchOrder = safe.wrapAsync(fetchOrder)
+const safeProcessPayment = safe.wrapAsync(processPayment)
+
 async function processOrder(orderId: string) {
-  const [order, fetchError] = await safe.async(() => fetchOrder(orderId))
+  const [order, fetchError] = await safeFetchOrder(orderId)
   if (fetchError) {
     console.error('Failed to fetch order:', fetchError.message)
     return null
   }
 
-  const [payment, paymentError] = await safe.async(() => processPayment(order))
+  const [payment, paymentError] = await safeProcessPayment(order)
   if (paymentError) {
     console.error('Payment failed:', paymentError.message)
     return null
@@ -134,7 +137,7 @@ async function getUser(id: string) {
 }
 ```
 
-**safe.async:**
+**safe.wrapAsync:**
 
 ```ts
 type ApiError = {
@@ -142,26 +145,24 @@ type ApiError = {
   message: string
 }
 
-const getUser = async (id: string) => {
-  const [user, error] = await safe.async(
-    async () => {
-      const response = await fetch(`/api/users/${id}`)
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      return response.json()
-    },
-    (e): ApiError => ({
-      type: e instanceof TypeError ? 'NETWORK' : 'HTTP',
-      message: e instanceof Error ? e.message : 'Unknown error',
-    })
-  )
+async function fetchUser(id: string) {
+  const response = await fetch(`/api/users/${id}`)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
 
-  if (error) {
-    // error is fully typed as ApiError
-    console.error(`${error.type}: ${error.message}`)
-    return null
-  }
+const safeGetUser = safe.wrapAsync(
+  fetchUser,
+  (e): ApiError => ({
+    type: e instanceof TypeError ? 'NETWORK' : 'HTTP',
+    message: e instanceof Error ? e.message : 'Unknown error',
+  })
+)
 
-  return user
+const [user, error] = await safeGetUser('42')
+if (error) {
+  // error is fully typed as ApiError
+  console.error(`${error.type}: ${error.message}`)
 }
 ```
 

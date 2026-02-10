@@ -105,7 +105,7 @@ if (!results.user.ok) {
 
 ## With createSafe
 
-Works the same way on a `createSafe` instance:
+On a `createSafe` instance, `allSettled` accepts **raw async functions** instead of pre-wrapped `Promise<SafeResult>` entries. The instance applies its own `parseError`, hooks, retry, and timeout to each function automatically.
 
 ```ts
 const appSafe = createSafe({
@@ -113,11 +113,12 @@ const appSafe = createSafe({
     code: 'ERR',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { code: 'ERR', message: 'Unknown' },
 })
 
 const results = await appSafe.allSettled({
-  user: appSafe.async(() => fetchUser(userId)),
-  posts: appSafe.async(() => fetchPosts(userId)),
+  user: () => fetchUser(userId),
+  posts: () => fetchPosts(userId),
 })
 
 if (results.user.ok) {
@@ -128,6 +129,10 @@ if (!results.posts.ok) {
   console.error(results.posts.error.code) // typed as { code: string; message: string }
 }
 ```
+
+{% callout title="Standalone vs createSafe" type="note" %}
+The standalone `safe.allSettled` accepts `Promise<SafeResult>` entries (e.g., `safe.async(() => ...)`). The `createSafe` instance `allSettled` accepts raw async functions and wraps them automatically with the instance's configuration.
+{% /callout %}
 
 ---
 

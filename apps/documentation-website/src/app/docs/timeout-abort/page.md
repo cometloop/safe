@@ -2,7 +2,7 @@
 title: Timeout / Abort
 ---
 
-The `safe.async` and `safe.wrapAsync` functions support automatic timeout with `AbortSignal` integration. This is useful for preventing operations from hanging indefinitely and for implementing cancellable requests. {% .lead %}
+The `safe.async` and `safe.wrapAsync` functions support automatic timeout. This is useful for preventing operations from hanging indefinitely. {% .lead %}
 
 ---
 
@@ -11,8 +11,7 @@ The `safe.async` and `safe.wrapAsync` functions support automatic timeout with `
 The `abortAfter` option specifies a timeout in milliseconds. When the timeout is reached:
 
 1. A `TimeoutError` is thrown (which can be transformed via `parseError`)
-2. The `AbortController` is aborted, signaling to the function that it should cancel
-3. If retry is configured, each attempt gets its own fresh timeout
+2. If retry is configured, each attempt gets its own fresh timeout
 
 ```ts
 import { safe, TimeoutError } from '@cometloop/safe'
@@ -27,21 +26,28 @@ if (error instanceof TimeoutError) {
 }
 ```
 
+{% callout title="safe.async vs safe.wrapAsync" type="warning" %}
+`safe.async` passes an `AbortSignal` as the first parameter to your function, enabling **cooperative cancellation** (e.g., passing the signal to `fetch`). `safe.wrapAsync` does **not** pass a signal — it only enforces an external deadline. If the timeout fires, the underlying operation continues running in the background. Use `safe.async` when you need the function to actually cancel.
+{% /callout %}
+
 ---
 
 ## Timeout with safe.async
 
+When `abortAfter` is configured, `safe.async` passes an `AbortSignal` as the first parameter to your function. You can use this signal to cooperatively cancel the operation.
+
 ```ts
 import { safe, TimeoutError } from '@cometloop/safe'
 
-// Basic timeout
-const [data, error] = await safe.async(() => slowOperation(), {
-  abortAfter: 5000,
-})
+// Using the AbortSignal to cancel fetch
+const [data, error] = await safe.async(
+  (signal) => fetch('/api/data', { signal }),
+  { abortAfter: 5000 }
+)
 
 // With error mapping
 const [data, error] = await safe.async(
-  () => slowOperation(),
+  (signal) => fetch('/api/data', { signal }),
   (e) => ({
     code: e instanceof TimeoutError ? 'TIMEOUT' : 'UNKNOWN',
     message: e instanceof Error ? e.message : 'Unknown error',
@@ -52,19 +58,34 @@ const [data, error] = await safe.async(
 if (error?.code === 'TIMEOUT') {
   console.log('Operation timed out after 5 seconds')
 }
-
-// Using the AbortSignal in your function
-const [data, error] = await safe.async(
-  (signal) => fetch('/api/data', { signal }),
-  { abortAfter: 5000 }
-)
 ```
 
-When `abortAfter` is configured, an `AbortSignal` is passed as the first parameter to your function.
+The signal can be used with any `AbortSignal`-compatible API:
+
+```ts
+const [result, error] = await safe.async(
+  async (signal) => {
+    const controller = new AbortController()
+
+    // Link the safe signal to your own controller
+    signal?.addEventListener('abort', () => controller.abort())
+
+    const [users, orders] = await Promise.all([
+      fetch('/api/users', { signal: controller.signal }),
+      fetch('/api/orders', { signal: controller.signal }),
+    ])
+
+    return { users: await users.json(), orders: await orders.json() }
+  },
+  { abortAfter: 10000 }
+)
+```
 
 ---
 
 ## Timeout with safe.wrapAsync
+
+With `safe.wrapAsync`, `abortAfter` enforces an external deadline — the promise is rejected with a `TimeoutError` after the specified duration. However, the wrapped function does **not** receive an `AbortSignal`, so the underlying operation continues running in the background after timeout.
 
 ```ts
 import { safe, TimeoutError } from '@cometloop/safe'
@@ -80,22 +101,10 @@ const safeFetch = safe.wrapAsync(
 )
 
 const [data, error] = await safeFetch('/api/users')
-```
 
-When `abortAfter` is configured, the signal is appended as an additional argument:
-
-```ts
-const safeFetchWithSignal = safe.wrapAsync(
-  async (url: string, options?: RequestInit, signal?: AbortSignal) => {
-    const res = await fetch(url, { ...options, signal })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    return res.json()
-  },
-  { abortAfter: 10000 }
-)
-
-// The signal is automatically passed when timeout is configured
-const [data, error] = await safeFetchWithSignal('/api/users', { method: 'GET' })
+if (error instanceof TimeoutError) {
+  console.log('Request timed out')
+}
 ```
 
 With error mapping and timeout:
@@ -117,6 +126,10 @@ const safeFetch = safe.wrapAsync(
 )
 ```
 
+{% callout title="Need cooperative cancellation?" type="note" %}
+If you need the function to actually stop work on timeout (e.g., cancel a `fetch` request), use `safe.async` instead — it passes the `AbortSignal` directly to your function.
+{% /callout %}
+
 ---
 
 ## Timeout with createSafe
@@ -131,11 +144,13 @@ const apiSafe = createSafe({
     code: e instanceof TimeoutError ? 'TIMEOUT' : 'API_ERROR',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { code: 'API_ERROR', message: 'Unknown' },
   abortAfter: 10000, // Default 10s timeout for all async operations
 })
 
 // All async calls use the default timeout
-const [users, error] = await apiSafe.async(() => fetchUsers())
+const safeFetchUsers = apiSafe.wrapAsync(fetchUsers)
+const [users, error] = await safeFetchUsers()
 
 // Per-call timeout OVERRIDES the default
 const [data, error] = await apiSafe.async(
@@ -183,6 +198,7 @@ const apiSafe = createSafe({
     type: e instanceof TimeoutError ? 'timeout' : 'error',
     message: e instanceof Error ? e.message : 'Unknown',
   }),
+  defaultError: { type: 'error', message: 'Unknown' },
   abortAfter: 5000,
   retry: { times: 2 },
   onRetry: (error, attempt) => {
@@ -191,69 +207,8 @@ const apiSafe = createSafe({
 })
 
 // Each call gets 3 attempts (1 initial + 2 retries), each with 5s timeout
-const [data, error] = await apiSafe.async(() => fetchData())
-```
-
----
-
-## Using AbortSignal
-
-### With safe.async
-
-The signal is passed as the first parameter to your function:
-
-```ts
-import { safe } from '@cometloop/safe'
-
-// Function receives signal as first parameter
-const [data, error] = await safe.async(
-  (signal) => {
-    return fetch('/api/data', { signal })
-  },
-  { abortAfter: 5000 }
-)
-
-// The signal can be used with any AbortSignal-compatible API
-const [result, error] = await safe.async(
-  async (signal) => {
-    const controller = new AbortController()
-
-    // Link the safe signal to your own controller
-    signal?.addEventListener('abort', () => controller.abort())
-
-    const [users, orders] = await Promise.all([
-      fetch('/api/users', { signal: controller.signal }),
-      fetch('/api/orders', { signal: controller.signal }),
-    ])
-
-    return { users: await users.json(), orders: await orders.json() }
-  },
-  { abortAfter: 10000 }
-)
-```
-
-### With safe.wrapAsync
-
-When `abortAfter` is configured, the signal is appended as an additional argument:
-
-```ts
-import { safe } from '@cometloop/safe'
-
-// Define function that accepts signal as last parameter
-async function fetchWithSignal(
-  url: string,
-  options?: RequestInit,
-  signal?: AbortSignal
-) {
-  const res = await fetch(url, { ...options, signal })
-  return res.json()
-}
-
-// Wrap with timeout - signal will be passed automatically
-const safeFetch = safe.wrapAsync(fetchWithSignal, { abortAfter: 5000 })
-
-// Call without signal - it's added automatically when timeout is configured
-const [data, error] = await safeFetch('/api/users', { method: 'GET' })
+const safeFetchData = apiSafe.wrapAsync(fetchData)
+const [data, error] = await safeFetchData()
 ```
 
 ---

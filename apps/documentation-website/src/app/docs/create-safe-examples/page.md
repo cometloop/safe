@@ -55,9 +55,12 @@ export const appSafe = createSafe({
   },
 })
 
-// Usage throughout your application
-const [user, error] = await appSafe.async(() => userService.findById(id))
-const [config, parseError] = appSafe.sync(() => JSON.parse(configString))
+// Wrap functions for reuse throughout your application
+const safeFindUser = appSafe.wrapAsync(userService.findById.bind(userService))
+const safeJsonParse = appSafe.wrap(JSON.parse)
+
+const [user, error] = await safeFindUser(id)
+const [config, parseError] = safeJsonParse(configString)
 ```
 
 ---
@@ -393,17 +396,18 @@ class TenantContext {
     this.safe = createTenantSafe(tenantId)
   }
 
-  getUsers = () =>
-    this.safe.async(() =>
-      db.users.findMany({ where: { tenantId: this.tenantId } })
-    )
+  private async _getUsers() {
+    return db.users.findMany({ where: { tenantId: this.tenantId } })
+  }
 
-  createDocument = (data: CreateDocumentDto) =>
-    this.safe.async(() =>
-      db.documents.create({
-        data: { ...data, tenantId: this.tenantId },
-      })
-    )
+  private async _createDocument(data: CreateDocumentDto) {
+    return db.documents.create({
+      data: { ...data, tenantId: this.tenantId },
+    })
+  }
+
+  getUsers = this.safe.wrapAsync(this._getUsers.bind(this))
+  createDocument = this.safe.wrapAsync(this._createDocument.bind(this))
 }
 
 // Middleware creates tenant context per request

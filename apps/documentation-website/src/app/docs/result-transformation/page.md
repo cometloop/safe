@@ -134,6 +134,7 @@ const validatedSafe = createSafe({
     code: 'ERROR',
     message: e instanceof Error ? e.message : String(e),
   }),
+  defaultError: { code: 'ERROR', message: 'Unknown error' },
   parseResult: (result) => userSchema.parse(result),
 })
 
@@ -192,40 +193,28 @@ safe.sync(
 
 ## Error handling
 
-If `parseResult` throws, the error is caught and processed through `parseError`:
+If `parseResult` throws, the error is **not** treated as a failure. Instead, the raw (untransformed) result is returned as a fallback. The error is reported via `onHookError` with hookName `'parseResult'`:
 
 ```ts
 const [data, error] = safe.sync(
   () => '{"valid": false}',
-  (e) => ({ code: 'VALIDATION_ERROR', message: String(e) }),
   {
     parseResult: (raw) => {
-      const parsed = JSON.parse(raw)
-      if (!parsed.valid) throw new Error('Invalid data')
-      return parsed
+      throw new Error('transform failed')
+    },
+    onHookError: (err, hookName) => {
+      // hookName === 'parseResult'
+      console.warn('parseResult threw:', err)
     },
   }
 )
-// error is { code: 'VALIDATION_ERROR', message: 'Invalid data' }
+// data is '{"valid": false}' (the raw result, untransformed)
+// error is null — this is still a success
 ```
 
-For async operations with retry, a `parseResult` throw counts as a failure and triggers the retry logic:
-
-```ts
-const [data, error] = await safe.async(
-  () => fetchFlaky(),
-  {
-    parseResult: (raw) => {
-      if (!raw.ready) throw new Error('Not ready yet')
-      return raw.data
-    },
-    retry: { times: 3 },
-    onRetry: (error, attempt) => {
-      console.log(`Attempt ${attempt} — result not ready, retrying...`)
-    },
-  }
-)
-```
+{% callout title="parseResult is safe" type="note" %}
+A failing `parseResult` never turns a successful operation into an error. The raw result is returned instead, and the failure is only observable through `onHookError`. This matches the safety guarantee of other hooks.
+{% /callout %}
 
 ---
 
@@ -250,6 +239,7 @@ With `createSafe`, the factory `parseResult` return type becomes the default `TR
 ```ts
 const appSafe = createSafe({
   parseError: (e) => String(e),
+  defaultError: 'unknown error',
   parseResult: (result) => ({ wrapped: result }),
 })
 

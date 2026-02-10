@@ -9,13 +9,83 @@ Complete type reference for all exported types in `@cometloop/safe`. {% .lead %}
 ## SafeResult
 
 ```ts
-type SafeResult<T, E = Error> = readonly [T, null] | readonly [null, E]
+type SafeResult<T, E = Error> = SafeOk<T> | SafeErr<E>
 ```
 
-A discriminated union tuple where:
+A discriminated union that supports both tuple destructuring and tagged property access:
 
-- On success: `[value, null]`
-- On error: `[null, error]`
+- On success: `[value, null]` with `.ok = true`, `.value = T`, `.error = null`
+- On error: `[null, error]` with `.ok = false`, `.value = null`, `.error = E`
+
+```ts
+// Tuple destructuring
+const [data, error] = safeParse('{"valid": true}')
+
+// Tagged property access
+const result = safeParse('{"valid": true}')
+if (result.ok) {
+  console.log(result.value)
+} else {
+  console.error(result.error)
+}
+```
+
+---
+
+## SafeOk
+
+```ts
+type SafeOk<T> = readonly [T, null] & {
+  readonly ok: true
+  readonly value: T
+  readonly error: null
+}
+```
+
+The success variant of `SafeResult`. Combines a readonly tuple `[T, null]` with tagged discriminant properties for pattern matching.
+
+---
+
+## SafeErr
+
+```ts
+type SafeErr<E> = readonly [null, E] & {
+  readonly ok: false
+  readonly value: null
+  readonly error: E
+}
+```
+
+The error variant of `SafeResult`. Combines a readonly tuple `[null, E]` with tagged discriminant properties for pattern matching.
+
+---
+
+## ok
+
+```ts
+function ok<T>(value: T): SafeOk<T>
+```
+
+Constructs a success result. Useful when building `SafeResult` values manually (e.g., in custom wrappers or adapters):
+
+```ts
+import { ok, err } from '@cometloop/safe'
+
+function divide(a: number, b: number): SafeResult<number, string> {
+  if (b === 0) return err('Division by zero')
+  return ok(a / b)
+}
+```
+
+---
+
+## err
+
+```ts
+function err<E>(error: E): SafeErr<E>
+```
+
+Constructs an error result. See [ok](#ok) for a usage example.
 
 ---
 
@@ -65,7 +135,11 @@ Extended hooks for async operations with retry and timeout support:
 - Extends `SafeHooks` with all its properties (including `parseResult`)
 - `onRetry` — Called before each retry attempt with the error, 1-indexed attempt number, and context
 - `retry` — Optional retry configuration
-- `abortAfter` — Optional timeout in milliseconds. When set, creates an `AbortController` and passes the signal to the function
+- `abortAfter` — Optional timeout in milliseconds. When set, creates an `AbortController` for deadline enforcement
+
+{% callout title="AbortSignal and abortAfter" type="note" %}
+When `abortAfter` is configured, `safe.async` passes an `AbortSignal` as the first parameter to your function for cooperative cancellation. `safe.wrapAsync` does **not** pass a signal — it only enforces an external deadline. See [Timeout / Abort](/docs/timeout-abort) for details.
+{% /callout %}
 
 ---
 
@@ -169,20 +243,34 @@ type SafeInstance<E, TResult = never> = {
     fn: (...args: TArgs) => Promise<T>,
     hooks?: SafeAsyncHooks<T, E, TArgs, TOut>
   ) => (...args: TArgs) => Promise<SafeResult<TOut, E>>
-  all: <T extends Record<string, Promise<SafeResult<any, any>>>>(
-    promises: T
+  all: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(
+    fns: T
   ) => Promise<SafeResult<
-    { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never },
-    T[keyof T] extends Promise<SafeResult<any, infer EE>> ? EE : never
+    { [K in keyof T]: [TResult] extends [never]
+      ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
+      : TResult
+    },
+    E
   >>
-  allSettled: <T extends Record<string, Promise<SafeResult<any, any>>>>(
-    promises: T
-  ) => Promise<{ [K in keyof T]: Awaited<T[K]> }>
+  allSettled: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(
+    fns: T
+  ) => Promise<{
+    [K in keyof T]: SafeResult<
+      [TResult] extends [never]
+        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
+        : TResult,
+      E
+    >
+  }>
 }
 ```
 
 A pre-configured safe instance with a fixed error type. Methods do not accept a `parseError` parameter (already configured). When `parseResult` is configured at the factory level, `TResult` becomes the default result type for all methods. Per-call `parseResult` (via hooks) overrides the factory default.
 
+{% callout title="all and allSettled" type="note" %}
+On a `createSafe` instance, `all` and `allSettled` accept **raw async functions** — not pre-wrapped `Promise<SafeResult>` entries. The instance applies its own `parseError`, hooks, retry, and timeout configuration to each function automatically. The standalone `safe.all` and `safe.allSettled` accept `Promise<SafeResult>` entries instead.
+{% /callout %}
+
 {% callout title="AbortSignal behavior" type="note" %}
-When `abortAfter` is configured, the `async` method passes an `AbortSignal` as the first parameter to your function. For `wrapAsync`, the signal is appended as an additional argument.
+When `abortAfter` is configured, the `async` method passes an `AbortSignal` as the first parameter to your function. `wrapAsync` does **not** pass a signal — it enforces an external deadline only. See [Timeout / Abort](/docs/timeout-abort) for details.
 {% /callout %}

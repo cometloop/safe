@@ -121,8 +121,11 @@ const dbSafe = createSafe({
 })
 
 // All operations use the same error mapper
-const [user, error] = await dbSafe.async(() => db.user.findById(id))
-const [order, error2] = await dbSafe.async(() => db.order.findById(orderId))
+const safeFindUser = dbSafe.wrapAsync(db.user.findById.bind(db.user))
+const safeFindOrder = dbSafe.wrapAsync(db.order.findById.bind(db.order))
+
+const [user, error] = await safeFindUser(id)
+const [order, error2] = await safeFindOrder(orderId)
 ```
 
 {% callout title="TypeScript inference" type="note" %}

@@ -1,7 +1,12 @@
 import { Callout } from '@/components/Callout'
 import { QuickLink, QuickLinks } from '@/components/QuickLinks'
+import { Playground } from '@/components/playground/Playground'
 
 const tags = {
+  playground: {
+    render: Playground,
+    selfClosing: true,
+  },
   callout: {
     attributes: {
       title: { type: String },
