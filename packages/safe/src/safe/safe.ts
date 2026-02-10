@@ -318,7 +318,7 @@ async function safeAsync<T, E = Error, TOut = T>(
       if (attempt < maxAttempts) {
         callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, context), onHookError, 'onRetry')
         const waitMs = resolvedHooks?.retry?.waitBefore?.(attempt) ?? 0
-        if (waitMs > 0) {
+        if (waitMs > 0 && Number.isFinite(waitMs)) {
           await sleep(waitMs)
         }
       }
@@ -513,7 +513,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
         if (attempt < maxAttempts) {
           callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, args), onHookError, 'onRetry')
           const waitMs = resolvedHooks?.retry?.waitBefore?.(attempt) ?? 0
-          if (waitMs > 0) {
+          if (waitMs > 0 && Number.isFinite(waitMs)) {
             await sleep(waitMs)
           }
         }
