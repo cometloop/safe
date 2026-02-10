@@ -115,9 +115,8 @@ const dbSafe = createSafe({
   parseError: (e) => ({
     code: e instanceof Error ? e.name : 'UNKNOWN',
     message: e instanceof Error ? e.message : String(e),
-    timestamp: new Date(),
   }),
-  defaultError: { code: 'UNKNOWN', message: 'Unknown error', timestamp: new Date() },
+  defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
 })
 
 // All operations use the same error mapper

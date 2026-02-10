@@ -7,6 +7,13 @@ export const navigation = [
     ],
   },
   {
+    title: 'Best practices',
+    links: [
+      { title: 'Recommended patterns', href: '/docs/recommended-patterns' },
+      { title: "What if I don't like tuples?", href: '/docs/object-results' },
+    ],
+  },
+  {
     title: 'Core API',
     links: [
       { title: 'safe.wrap', href: '/docs/safe-wrap' },

@@ -1,4 +1,5 @@
-export type { SafeOk, SafeErr, SafeResult, SafeHooks, SafeAsyncHooks, RetryConfig, CreateSafeConfig, SafeInstance, NonFalsy } from './types'
-export { ok, err, TimeoutError } from './types'
+export type { SafeOk, SafeErr, SafeResult, SafeHooks, SafeAsyncHooks, RetryConfig, CreateSafeConfig, SafeInstance, NonFalsy, SafeOkObj, SafeErrObj, SafeResultObj, SafeObjectInstance } from './types'
+export { ok, err, okObj, errObj, TimeoutError } from './types'
 export { safe } from './safe'
 export { createSafe } from './createSafe'
+export { withObjects } from './withObjects'

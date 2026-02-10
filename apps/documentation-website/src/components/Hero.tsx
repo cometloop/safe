@@ -121,14 +121,52 @@ export function Hero() {
               priority
             />
             <div className="relative">
-              <p className="inline bg-linear-to-r from-indigo-200 via-sky-400 to-indigo-200 bg-clip-text font-display text-5xl tracking-tight text-transparent">
+              <p className="inline bg-linear-to-r from-indigo-200 via-sky-400 to-indigo-200 bg-clip-text font-display text-6xl tracking-tight text-transparent">
                 Type-safe error handling for TypeScript.
               </p>
-              <p className="mt-3 text-2xl tracking-tight text-slate-400">
-                Wrap any function — all returning <code>[result, error]</code>.
+              <section className="py-10 text-white">
+                <h1 className="mb-6 bg-gradient-to-r from-blue-400 to-blue-600 bg-clip-text text-3xl font-extrabold text-transparent">
+                  Wrap any function
+                </h1>
+                {/* <p className="mx-auto mb-10 max-w-2xl text-2xl text-gray-300">
+                  Return type-safe results with zero try/catch, hooks, and clean
+                  call sites
+                </p> */}
+
+                <ul className="max-w-3xl list-inside list-disc space-y-2 gap-x-10 gap-y-4 text-left text-lg text-gray-300">
+                  <li>
+                    <strong>Flexible wrapping</strong> — single function, domain
+                    scope, or app-wide
+                  </li>
+
+                  <li>
+                    <strong>Type-safe results</strong> — tuples or objects
+                  </li>
+                  <li>
+                    <strong>Flexible parsing</strong> — transform results and
+                    errors with full type inference
+                  </li>
+                  <li>
+                    <strong>Built in hooks</strong> — run side effects
+                    automatically
+                  </li>
+                  <li>
+                    <strong>Async utils included</strong> — retry, timeout,
+                    abort, all, allSettled
+                  </li>
+                  <li>
+                    <strong>No try/catch clutter</strong> — clean, concise call
+                    sites
+                  </li>
+                </ul>
+              </section>
+              {/* <p className="mt-3 text-2xl tracking-tight text-slate-400">
+                <span className="">Wrap any function.</span> Get type-safe
+                tuples or objects.
                 <br />
-                Powerful typed parsing, zero try/catch, built-in hooks.
-              </p>
+                Zero try/catch, built-in hooks, automatic error and result
+                parsing, and clean call sites.
+              </p> */}
               <div className="mt-8 flex gap-4 md:justify-center lg:justify-start">
                 <Button href="/docs/installation">Get started</Button>
                 <Button href="/docs/safe-sync" variant="secondary">

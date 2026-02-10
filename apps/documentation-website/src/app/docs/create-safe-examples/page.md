@@ -17,7 +17,6 @@ import * as Sentry from '@sentry/node'
 type AppError = {
   code: string
   message: string
-  timestamp: Date
   requestId?: string
   stack?: string
 }
@@ -28,14 +27,12 @@ export const appSafe = createSafe({
     return {
       code: error.name === 'Error' ? 'UNKNOWN_ERROR' : error.name,
       message: error.message,
-      timestamp: new Date(),
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     }
   },
   defaultError: {
     code: 'UNKNOWN_ERROR',
     message: 'An unknown error occurred',
-    timestamp: new Date(),
   },
   onSuccess: (result) => {
     metrics.increment('operation.success')
@@ -44,7 +41,6 @@ export const appSafe = createSafe({
     logger.error('Operation failed', {
       code: error.code,
       message: error.message,
-      timestamp: error.timestamp,
     })
 
     Sentry.captureException(new Error(error.message), {
@@ -355,7 +351,6 @@ type TenantError = {
   code: string
   message: string
   tenantId: string
-  timestamp: Date
 }
 
 function createTenantSafe(tenantId: string): SafeInstance<TenantError> {
@@ -364,13 +359,11 @@ function createTenantSafe(tenantId: string): SafeInstance<TenantError> {
       code: e instanceof Error ? e.name : 'UNKNOWN',
       message: e instanceof Error ? e.message : String(e),
       tenantId,
-      timestamp: new Date(),
     }),
     defaultError: {
       code: 'UNKNOWN',
       message: 'Unknown error',
       tenantId,
-      timestamp: new Date(),
     },
     onSuccess: () => {
       metrics.increment('tenant.operation.success', { tenantId })

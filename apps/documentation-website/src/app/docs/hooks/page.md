@@ -159,21 +159,22 @@ const [length, error] = safe.sync(
 
 ### Error handling
 
-If `parseResult` throws, the raw (untransformed) result is returned as a fallback. The error is reported via `onHookError` with hookName `'parseResult'`. A failing `parseResult` never turns a successful operation into an error.
+If `parseResult` throws, the error is routed through the standard error path — just like any error thrown by the wrapped function. It goes through `parseError` (if provided), triggers `onError` and `onSettled`, and returns `[null, error]`.
 
 ```ts
 const [data, error] = safe.sync(
   () => 42,
+  (e) => ({ code: 'TRANSFORM_FAILED', message: String(e) }),
   {
     parseResult: (n) => {
       throw new Error('transform failed')
     },
-    onHookError: (err, hookName) => {
-      // hookName === 'parseResult'
+    onError: (err) => {
+      // err is { code: 'TRANSFORM_FAILED', message: 'Error: transform failed' }
     },
   }
 )
-// data is 42 (raw result), error is null
+// data is null, error is { code: 'TRANSFORM_FAILED', message: '...' }
 ```
 
 {% callout title="parseResult vs hooks" type="note" %}

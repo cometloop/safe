@@ -2,15 +2,18 @@
 title: createSafe
 ---
 
-Creates a pre-configured safe instance with a fixed error mapping function and optional default hooks. The error type is automatically inferred from the `parseError` return type. {% .lead %}
+The recommended way to use `@cometloop/safe`. Creates a pre-configured safe instance so your call sites stay clean and minimal — just a normal function call, no extra configuration. {% .lead %}
 
 ---
 
 ## When to use createSafe
 
-- You want consistent error mapping across multiple operations
-- You need default logging/analytics hooks for all operations
-- You want to avoid repeating `parseError` on every call
+`createSafe` is the best way to use this library. The goal is simple: **move all error handling configuration out of your call sites** so they read like normal function calls.
+
+- You want call sites that are clean and minimal — no inline `parseError`, no options objects
+- You want consistent error mapping across multiple operations without repeating yourself
+- You need default logging/analytics hooks that run automatically
+- You want to wrap functions once and call them everywhere like any other function
 
 ---
 
@@ -39,40 +42,36 @@ type CreateSafeConfig<E, TResult = never> = {
 
 ## Basic usage
 
+Configure once, then every call site is just a function call:
+
 ```ts
 import { createSafe } from '@cometloop/safe'
 
 type AppError = {
   code: string
   message: string
-  timestamp: Date
 }
 
+// All the configuration lives here — once
 const appSafe = createSafe({
   parseError: (e): AppError => ({
     code: 'UNKNOWN_ERROR',
     message: e instanceof Error ? e.message : 'An unknown error occurred',
-    timestamp: new Date(),
   }),
   defaultError: {
     code: 'UNKNOWN_ERROR',
     message: 'An unknown error occurred',
-    timestamp: new Date(),
   },
 })
 
-// All methods now return AppError on failure — no need to pass parseError each time
+// Wrap your functions
 const safeJsonParse = appSafe.wrap(JSON.parse)
-const [data, error] = safeJsonParse(jsonString)
-if (error) {
-  console.error(error.code, error.message) // error is typed as AppError
-}
-
 const safeFetchUser = appSafe.wrapAsync(fetchUser)
+
+// Call sites are clean — just like calling a normal function
+const [data, error] = safeJsonParse(jsonString)
 const [user, err] = await safeFetchUser(id)
-if (err) {
-  console.error(err.code) // err is typed as AppError
-}
+// error and err are fully typed as AppError
 ```
 
 ---
@@ -86,12 +85,10 @@ const loggingSafe = createSafe({
   parseError: (e): AppError => ({
     code: 'ERROR',
     message: e instanceof Error ? e.message : String(e),
-    timestamp: new Date(),
   }),
   defaultError: {
     code: 'ERROR',
     message: 'An unknown error occurred',
-    timestamp: new Date(),
   },
   onSuccess: (result) => {
     console.log('Operation succeeded:', result)

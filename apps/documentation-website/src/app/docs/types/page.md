@@ -274,3 +274,100 @@ On a `createSafe` instance, `all` and `allSettled` accept **raw async functions*
 {% callout title="AbortSignal behavior" type="note" %}
 When `abortAfter` is configured, the `async` method passes an `AbortSignal` as the first parameter to your function. `wrapAsync` does **not** pass a signal — it enforces an external deadline only. See [Timeout / Abort](/docs/timeout-abort) for details.
 {% /callout %}
+
+---
+
+## SafeResultObj
+
+```ts
+type SafeResultObj<T, E = Error> = SafeOkObj<T> | SafeErrObj<E>
+```
+
+An object-style result type. Unlike `SafeResult` (which is a tagged tuple), all properties are enumerable — making results spreadable, JSON-serializable, and loggable out of the box.
+
+- On success: `{ ok: true, data: T, error: null }`
+- On error: `{ ok: false, data: null, error: E }`
+
+```ts
+const result = withObjects(safe.sync(() => 42))
+if (result.ok) {
+  console.log(result.data) // 42
+}
+```
+
+See [What if I don't like tuples?](/docs/object-results) for full usage guide.
+
+---
+
+## SafeOkObj
+
+```ts
+type SafeOkObj<T> = {
+  readonly ok: true
+  readonly data: T
+  readonly error: null
+}
+```
+
+The success variant of `SafeResultObj`.
+
+---
+
+## SafeErrObj
+
+```ts
+type SafeErrObj<E> = {
+  readonly ok: false
+  readonly data: null
+  readonly error: E
+}
+```
+
+The error variant of `SafeResultObj`.
+
+---
+
+## okObj
+
+```ts
+function okObj<T>(data: T): SafeOkObj<T>
+```
+
+Constructs a success object result. Useful when building `SafeResultObj` values manually:
+
+```ts
+import { okObj, errObj } from '@cometloop/safe'
+
+function validate(input: string): SafeResultObj<number, string> {
+  const n = Number(input)
+  if (Number.isNaN(n)) return errObj('not a number')
+  return okObj(n)
+}
+```
+
+---
+
+## errObj
+
+```ts
+function errObj<E>(error: E): SafeErrObj<E>
+```
+
+Constructs an error object result. See [okObj](#okobj) for a usage example.
+
+---
+
+## SafeObjectInstance
+
+```ts
+type SafeObjectInstance<E, TResult = never>
+```
+
+Object-style variant of `SafeInstance`. Every method returns `SafeResultObj` instead of `SafeResult` tuples. Created by wrapping a `SafeInstance` with `withObjects()`:
+
+```ts
+const appSafe = withObjects(createSafe({ ... }))
+// appSafe is SafeObjectInstance<E, TResult>
+```
+
+The method signatures are identical to `SafeInstance`, with `SafeResult` replaced by `SafeResultObj` throughout. See [What if I don't like tuples?](/docs/object-results) for details.

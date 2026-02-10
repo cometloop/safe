@@ -2,7 +2,7 @@
 title: Comparison with try-catch
 ---
 
-See how `safe` compares to traditional try-catch error handling. {% .lead %}
+See how `@cometloop/safe` compares to traditional try-catch error handling — and how `createSafe` keeps call sites as clean as possible. {% .lead %}
 
 ---
 
@@ -43,13 +43,27 @@ async function processOrder(orderId: string) {
 
 ---
 
-## With safe utilities
+## With createSafe (recommended)
+
+The best way to use `@cometloop/safe` is with `createSafe`. Configure error handling once, wrap your functions, and the call site looks like normal code:
 
 ```ts
-// Benefits: typed errors, flat structure, explicit handling
-const safeFetchOrder = safe.wrapAsync(fetchOrder)
-const safeProcessPayment = safe.wrapAsync(processPayment)
+// Configure once — in a shared module like lib/safe.ts
+const appSafe = createSafe({
+  parseError: (e) => ({
+    code: e instanceof Error ? e.name : 'UNKNOWN',
+    message: e instanceof Error ? e.message : String(e),
+  }),
+  defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+})
 
+// Wrap functions once
+const safeFetchOrder = appSafe.wrapAsync(fetchOrder)
+const safeProcessPayment = appSafe.wrapAsync(processPayment)
+```
+
+```ts
+// Call site — clean and minimal, just like normal function calls
 async function processOrder(orderId: string) {
   const [order, fetchError] = await safeFetchOrder(orderId)
   if (fetchError) {
@@ -67,8 +81,9 @@ async function processOrder(orderId: string) {
 }
 ```
 
-**Benefits of safe:**
+**Benefits:**
 
+- **Clean call sites** — looks like calling a normal function, no extra noise
 - Errors are **typed** — TypeScript knows the exact error shape
 - **Flat structure** — no nesting, reads top to bottom
 - **Explicit** — errors are part of the return type, impossible to forget
@@ -100,17 +115,18 @@ if (result === null) {
 }
 ```
 
-**safe.wrap:**
+**createSafe + wrap:**
 
 ```ts
-const safeDivide = safe.wrap((a: number, b: number) => {
+const safeDivide = appSafe.wrap((a: number, b: number) => {
   if (b === 0) throw new Error('Division by zero')
   return a / b
 })
 
+// Call site is clean — just a function call
 const [result, error] = safeDivide(10, 2)
 if (error) {
-  // Unambiguous: this was an error
+  // Unambiguous: this was an error, fully typed
   console.error(error.message)
 }
 ```
@@ -137,32 +153,21 @@ async function getUser(id: string) {
 }
 ```
 
-**safe.wrapAsync:**
+**createSafe + wrapAsync:**
 
 ```ts
-type ApiError = {
-  type: 'NETWORK' | 'HTTP' | 'PARSE' | 'UNKNOWN'
-  message: string
-}
-
-async function fetchUser(id: string) {
+// Error mapping is configured once in createSafe — not repeated here
+const safeGetUser = appSafe.wrapAsync(async (id: string) => {
   const response = await fetch(`/api/users/${id}`)
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return response.json()
-}
+})
 
-const safeGetUser = safe.wrapAsync(
-  fetchUser,
-  (e): ApiError => ({
-    type: e instanceof TypeError ? 'NETWORK' : 'HTTP',
-    message: e instanceof Error ? e.message : 'Unknown error',
-  })
-)
-
+// Call site is minimal — just call the function
 const [user, error] = await safeGetUser('42')
 if (error) {
-  // error is fully typed as ApiError
-  console.error(`${error.type}: ${error.message}`)
+  // error is fully typed — no `unknown`, no manual narrowing
+  console.error(`${error.code}: ${error.message}`)
 }
 ```
 
