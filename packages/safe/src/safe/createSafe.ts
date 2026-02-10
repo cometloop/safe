@@ -1,6 +1,6 @@
 import type { SafeResult, SafeHooks, SafeAsyncHooks, CreateSafeConfig, SafeInstance } from './types'
 import { ok, err } from './types'
-import { safeSync, safeAsync, wrap, wrapAsync, callHook } from './safe'
+import { safeSync, safeAsync, wrap, wrapAsync, callHook, toError, callParseError } from './safe'
 
 // Utility types for typed assertions in all/allSettled (mirrors SafeInstance declarations)
 type AllValues<
@@ -169,24 +169,31 @@ export function createSafe<E, TResult = never>(config: CreateSafeConfig<E, TResu
         let done = false
 
         for (let i = 0; i < promises.length; i++) {
-          promises[i].then((result) => {
-            if (done) return
-            if (!result.ok) {
-              done = true
-              resolve(err(result.error) as Result)
-              return
-            }
-            results[i] = result
-            remaining--
-            if (remaining === 0) {
-              done = true
-              const obj: Record<string, unknown> = {}
-              for (let j = 0; j < keys.length; j++) {
-                obj[keys[j]] = results[j].value
+          promises[i].then(
+            (result) => {
+              if (done) return
+              if (!result.ok) {
+                done = true
+                resolve(err(result.error) as Result)
+                return
               }
-              resolve(ok(obj) as Result)
-            }
-          })
+              results[i] = result
+              remaining--
+              if (remaining === 0) {
+                done = true
+                const obj: Record<string, unknown> = {}
+                for (let j = 0; j < keys.length; j++) {
+                  obj[keys[j]] = results[j].value
+                }
+                resolve(ok(obj) as Result)
+              }
+            },
+            (rejection) => {
+              if (done) return
+              done = true
+              resolve(err(callParseError(rejection, parseError, defaultOnHookError, defaultError)) as Result)
+            },
+          )
         }
       })
     },

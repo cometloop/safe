@@ -18,14 +18,36 @@ const HOOK_KEY_MAP: Record<keyof SafeAsyncHooks<any, any, any>, true> = {
 }
 const HOOK_KEYS: ReadonlySet<string> = new Set(Object.keys(HOOK_KEY_MAP))
 
+// Keys whose values must be functions when present and not undefined.
+const FUNCTION_HOOK_KEYS: ReadonlySet<string> = new Set([
+  'parseResult', 'onSuccess', 'onError', 'onSettled', 'onHookError', 'onRetry',
+])
+
 // Type guard to distinguish hooks object from parseError function.
-// Requires at least one recognized key to avoid false positives on {}.
+// Requires at least one recognized key AND validates value types to
+// avoid false positives (e.g. { retry: 3 } misidentified as hooks).
 const isHooks = <T, E, TContext extends unknown[]>(
   arg: unknown
 ): arg is SafeHooks<T, E, TContext> => {
   if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return false
   const keys = Object.keys(arg)
-  return keys.length > 0 && keys.every(key => HOOK_KEYS.has(key))
+  if (keys.length === 0) return false
+
+  const obj = arg as Record<string, unknown>
+  for (const key of keys) {
+    if (!HOOK_KEYS.has(key)) return false
+    const val = obj[key]
+    if (val === undefined) continue // optional property
+    if (FUNCTION_HOOK_KEYS.has(key)) {
+      if (typeof val !== 'function') return false
+    } else if (key === 'retry') {
+      if (typeof val !== 'object' || val === null) return false
+    } else if (key === 'abortAfter') {
+      if (typeof val !== 'number') return false
+    }
+    // defaultError: any type allowed
+  }
+  return true
 }
 
 // Safely call a hook, swallowing any errors it throws.
@@ -75,6 +97,43 @@ const callParseError = <E>(
     }
     return defaultError ?? (toError(e) as E)
   }
+}
+
+// Safely call parseResult, falling back to the raw result if it throws.
+// A failing transformer should not turn a successful fn() call into an error.
+const callParseResult = <T, TOut>(
+  parseResult: ((response: T) => TOut) | undefined,
+  rawResult: T,
+  onHookError?: (error: unknown, hookName: string) => void,
+): TOut => {
+  if (!parseResult) return rawResult as unknown as TOut
+  try {
+    return parseResult(rawResult)
+  } catch (e) {
+    try {
+      onHookError?.(e, 'parseResult')
+    } catch {
+      // onHookError itself must never throw
+    }
+    return rawResult as unknown as TOut
+  }
+}
+
+// Sanitise retry.times: floor to integer, clamp to >= 0, treat NaN as 0.
+const sanitiseRetryTimes = (times: number | undefined): number => {
+  if (times === undefined) return 0
+  const n = Math.floor(times)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return n
+}
+
+// Validate abortAfter: must be a finite number >= 0.
+const validateAbortAfter = (ms: number | undefined): number | undefined => {
+  if (ms === undefined) return undefined
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new RangeError(`abortAfter must be a non-negative finite number, got ${ms}`)
+  }
+  return ms
 }
 
 // Helper for async delays
@@ -163,9 +222,7 @@ function safeSync<T, E = Error, TOut = T>(
 
   try {
     const rawResult = fn()
-    const result = (resolvedHooks?.parseResult
-      ? resolvedHooks.parseResult(rawResult)
-      : rawResult) as TOut
+    const result = callParseResult(resolvedHooks?.parseResult, rawResult, onHookError)
     callHook(() => resolvedHooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
     callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
     return ok(result)
@@ -232,8 +289,8 @@ async function safeAsync<T, E = Error, TOut = T>(
     resolvedHooks = hooks
   }
 
-  const maxAttempts = (resolvedHooks?.retry?.times ?? 0) + 1
-  const abortAfter = resolvedHooks?.abortAfter
+  const maxAttempts = sanitiseRetryTimes(resolvedHooks?.retry?.times) + 1
+  const abortAfter = validateAbortAfter(resolvedHooks?.abortAfter)
   const onHookError = resolvedHooks?.onHookError
   let lastError!: E
 
@@ -250,9 +307,7 @@ async function safeAsync<T, E = Error, TOut = T>(
       }
 
       const rawResult = await promise
-      const result = (resolvedHooks?.parseResult
-        ? resolvedHooks.parseResult(rawResult)
-        : rawResult) as TOut
+      const result = callParseResult(resolvedHooks?.parseResult, rawResult, onHookError)
       callHook(() => resolvedHooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
       callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
       return ok(result)
@@ -338,9 +393,7 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
   return function (this: unknown, ...args: TArgs) {
     try {
       const rawResult = fn.call(this, ...args)
-      const result = (resolvedHooks?.parseResult
-        ? resolvedHooks.parseResult(rawResult)
-        : rawResult) as TOut
+      const result = callParseResult(resolvedHooks?.parseResult, rawResult, onHookError)
       callHook(() => resolvedHooks?.onSuccess?.(result, args), onHookError, 'onSuccess')
       callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
       return ok(result)
@@ -429,8 +482,8 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
     resolvedHooks = hooks
   }
 
-  const maxAttempts = (resolvedHooks?.retry?.times ?? 0) + 1
-  const abortAfter = resolvedHooks?.abortAfter
+  const maxAttempts = sanitiseRetryTimes(resolvedHooks?.retry?.times) + 1
+  const abortAfter = validateAbortAfter(resolvedHooks?.abortAfter)
   const onHookError = resolvedHooks?.onHookError
 
   return async function (this: unknown, ...args: TArgs) {
@@ -449,9 +502,7 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
         }
 
         const rawResult = await promise
-        const result = (resolvedHooks?.parseResult
-          ? resolvedHooks.parseResult(rawResult)
-          : rawResult) as TOut
+        const result = callParseResult(resolvedHooks?.parseResult, rawResult, onHookError)
         callHook(() => resolvedHooks?.onSuccess?.(result, args), onHookError, 'onSuccess')
         callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
         return ok(result)
@@ -542,6 +593,9 @@ function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
             resolve(ok(obj) as SafeResult<Values, Err>)
           }
         },
+        // Safety net: safe-wrapped promises should never reject.
+        // No parseError is available in the standalone API, so toError is
+        // the best fallback. Use createSafe.all() if custom error mapping is needed.
         (rejection) => {
           if (done) return
           done = true
@@ -608,4 +662,4 @@ export const safe = {
 } as const
 
 // Export individual functions for use by createSafe
-export { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled, callHook }
+export { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled, callHook, toError, callParseError }

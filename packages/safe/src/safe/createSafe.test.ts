@@ -2464,7 +2464,8 @@ describe('createSafe', () => {
     })
 
     describe('parseResult error handling', () => {
-      it('factory parseResult throw is caught by parseError', () => {
+      it('factory parseResult throw returns raw result and reports via onHookError', () => {
+        const onHookError = vi.fn()
         const appSafe = createSafe({
           parseError: (e) => ({
             code: 'PARSE_ERROR',
@@ -2473,20 +2474,24 @@ describe('createSafe', () => {
           parseResult: () => {
             throw new Error('validation failed')
           },
+          onHookError,
         })
 
         const [result, error] = appSafe.sync(() => 42)
 
-        expect(result).toBeNull()
-        expect(error).toEqual({ code: 'PARSE_ERROR', message: 'validation failed' })
+        expect(result).toBe(42)
+        expect(error).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
       })
 
-      it('per-call parseResult throw is caught by factory parseError', () => {
+      it('per-call parseResult throw returns raw result and reports via onHookError', () => {
+        const onHookError = vi.fn()
         const appSafe = createSafe({
           parseError: (e) => ({
             code: 'PARSE_ERROR',
             message: e instanceof Error ? e.message : 'Unknown',
           }),
+          onHookError,
         })
 
         const [result, error] = appSafe.sync(() => 42, {
@@ -2495,30 +2500,29 @@ describe('createSafe', () => {
           },
         })
 
-        expect(result).toBeNull()
-        expect(error).toEqual({ code: 'PARSE_ERROR', message: 'per-call validation failed' })
+        expect(result).toBe(42)
+        expect(error).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
       })
 
-      it('factory parseResult throw triggers retry on async', async () => {
-        let attempts = 0
-        const onRetry = vi.fn()
+      it('factory parseResult throw does not trigger retry on async', async () => {
+        const fn = vi.fn().mockResolvedValue('data')
+        const onHookError = vi.fn()
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
-          parseResult: (response) => {
-            attempts++
-            if (attempts < 3) throw new Error('not ready')
-            return response
-          },
+          parseResult: () => { throw new Error('not ready') },
           retry: { times: 3 },
-          onRetry,
+          onHookError,
         })
 
-        const [result, error] = await appSafe.async(() => Promise.resolve('data'))
+        const [result, error] = await appSafe.async(fn)
 
-        expect(error).toBeNull()
+        // parseResult failure is isolated — fn is not retried
+        expect(fn).toHaveBeenCalledTimes(1)
         expect(result).toBe('data')
-        expect(onRetry).toHaveBeenCalledTimes(2)
+        expect(error).toBeNull()
+        expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
       })
 
       it('parseResult not called on error path', () => {
@@ -2787,7 +2791,8 @@ describe('createSafe', () => {
       expect(data).toEqual({ only: 'solo' })
     })
 
-    it('parseResult throwing is caught by parseError in all()', async () => {
+    it('parseResult throwing returns raw values in all()', async () => {
+      const onHookError = vi.fn()
       const appSafe = createSafe({
         parseError: (e) => ({
           code: 'PARSE_RESULT_ERROR' as const,
@@ -2795,6 +2800,7 @@ describe('createSafe', () => {
         }),
         parseResult: () => { throw new Error('parseResult exploded') },
         defaultError: { code: 'PARSE_RESULT_ERROR' as const, message: 'default' },
+        onHookError,
       })
 
       const [data, error] = await appSafe.all({
@@ -2802,8 +2808,9 @@ describe('createSafe', () => {
         b: () => Promise.resolve(2),
       })
 
-      expect(data).toBeNull()
-      expect(error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
+      expect(error).toBeNull()
+      expect(data).toEqual({ a: 1, b: 2 })
+      expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
     })
 
     it('handles a function that throws synchronously (before returning a promise)', async () => {
@@ -2821,6 +2828,47 @@ describe('createSafe', () => {
 
       expect(data).toBeNull()
       expect(error).toEqual({ code: 'SYNC_THROW', message: 'sync kaboom' })
+    })
+
+    it('catches a raw promise rejection via defensive handler and applies parseError', async () => {
+      // An invalid abortAfter causes validateAbortAfter to throw *before*
+      // safeAsync's try-catch, making the returned promise reject outright.
+      // The rejection handler on .then() in createSafe.all must catch this
+      // and apply parseError (not just toError).
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'ERR' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+        abortAfter: -1,
+      })
+
+      const [data, error] = await appSafe.all({
+        a: () => Promise.resolve(1),
+      })
+
+      expect(data).toBeNull()
+      expect(error).toEqual({ code: 'ERR', message: expect.stringMatching(/abortAfter/) })
+    })
+
+    it('ignores late rejections after already resolved (rejection handler done guard)', async () => {
+      // Both promises reject via invalid abortAfter. The first rejection
+      // resolves the outer promise; the second hits `if (done) return`.
+      const appSafe = createSafe({
+        parseError: (e) => ({
+          code: 'ERR' as const,
+          message: e instanceof Error ? e.message : 'unknown',
+        }),
+        abortAfter: -1,
+      })
+
+      const [data, error] = await appSafe.all({
+        a: () => Promise.resolve(1),
+        b: () => Promise.resolve(2),
+      })
+
+      expect(data).toBeNull()
+      expect(error).toEqual({ code: 'ERR', message: expect.stringMatching(/abortAfter/) })
     })
   })
 
@@ -2914,7 +2962,8 @@ describe('createSafe', () => {
       expect(results.only.value).toBe('solo')
     })
 
-    it('parseResult throwing is caught by parseError in allSettled()', async () => {
+    it('parseResult throwing returns raw values in allSettled()', async () => {
+      const onHookError = vi.fn()
       const appSafe = createSafe({
         parseError: (e) => ({
           code: 'PARSE_RESULT_ERROR' as const,
@@ -2922,6 +2971,7 @@ describe('createSafe', () => {
         }),
         parseResult: () => { throw new Error('parseResult exploded') },
         defaultError: { code: 'PARSE_RESULT_ERROR' as const, message: 'default' },
+        onHookError,
       })
 
       const results = await appSafe.allSettled({
@@ -2929,10 +2979,11 @@ describe('createSafe', () => {
         b: () => Promise.resolve(2),
       })
 
-      expect(results.a.ok).toBe(false)
-      expect(results.a.error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
-      expect(results.b.ok).toBe(false)
-      expect(results.b.error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
+      expect(results.a.ok).toBe(true)
+      expect(results.a.value).toBe(1)
+      expect(results.b.ok).toBe(true)
+      expect(results.b.value).toBe(2)
+      expect(onHookError).toHaveBeenCalledWith(expect.any(Error), 'parseResult')
     })
   })
 
@@ -3227,6 +3278,43 @@ describe('createSafe', () => {
 
         expect(result).toEqual([42, null])
       })
+    })
+  })
+
+  describe('all with empty object', () => {
+    it('returns ok with empty object for empty input', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+      })
+
+      const [data, error] = await appSafe.all({})
+
+      expect(error).toBeNull()
+      expect(data).toEqual({})
+    })
+
+    it('result has ok: true for empty input', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => String(e),
+      })
+
+      const result = await appSafe.all({})
+
+      expect(result.ok).toBe(true)
+      expect(result.value).toEqual({})
+      expect(result.error).toBeNull()
+    })
+  })
+
+  describe('allSettled with empty object', () => {
+    it('returns empty object for empty input', async () => {
+      const appSafe = createSafe({
+        parseError: (e) => (e instanceof Error ? e.message : 'unknown'),
+      })
+
+      const results = await appSafe.allSettled({})
+
+      expect(results).toEqual({})
     })
   })
 })
