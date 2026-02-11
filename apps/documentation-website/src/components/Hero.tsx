@@ -10,46 +10,31 @@ import blurIndigoImage from '@/images/blur-indigo.png'
 
 const codeLanguage = 'typescript'
 
-const code = `// One-off wrapping — zero config
-const safeJSONParse = safe.wrap(JSON.parse)
-const [parsed, parseErr] = safeJSONParse(rawInput)
+const code = `// Wrap any function — zero config
+const safeParse = safe.wrap(JSON.parse)
+const [data, err] = safeParse(rawInput)
 
-const fetchUserOnce = safe.wrapAsync(fetchUserAsync)
-const [basicUser, basicError] = await fetchUserOnce('admin-456')
-
-// Configurable safety — from one function to many
+// Shared config for a whole domain
 const apiSafe = createSafe({
   parseError: errorParser,
-  parseResult: resultParser,
+  defaultError: fallbackError,
   onError: errorHook,
-  onSuccess: successHook,
-  onSettled: settledHook,
 })
 
 const fetchUser = apiSafe.wrapAsync(fetchUserAsync)
 const fetchPosts = apiSafe.wrapAsync(fetchPostsAsync)
 
-// Same shared config. Full type narrowing.
-const [user, userError] = await fetchUser('123')
-if (userError) return
+// Same config. Full type narrowing.
+const [user, userErr] = await fetchUser('123')
+if (userErr) return
 
-const [posts, postsError] = await fetchPosts(user.id)
-if (postsError) return
-
-console.log(user.name)
-console.log(posts.length)
-
-// Add resilience — retry with backoff + auto-cancel
-const fetchUserRetry = apiSafe.wrapAsync(fetchUserAsync, {
-  retry: { times: 3, waitBefore: (n) => n * 1000 },
-  abortAfter: 5000,
-  onRetry: (err, attempt) => console.log(\`Retry #\${attempt}...\`),
-})
+const [posts, postsErr] = await fetchPosts(user.id)
+console.log(user.name, posts.length)
 
 // Prefer objects? One call to switch.
 const objSafe = withObjects(apiSafe)
 const fetchPostsObj = objSafe.wrapAsync(fetchPostsAsync)
-const { ok, data, error } = await fetchPostsObj('123')
+const { ok, data: posts2, error } = await fetchPostsObj('123')
 `
 
 // const code = `import { safe } from '@cometloop/safe'
