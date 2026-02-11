@@ -33,7 +33,7 @@ jobs:
           NODE_ENV: production
 
       - name: Build documentation website
-        run: pnpm --filter tailwind-plus-syntax build
+        run: pnpm --filter @cometloop/safe-docs build
         env:
           GITHUB_PAGES: 'true'
 
