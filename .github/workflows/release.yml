@@ -48,7 +48,7 @@ jobs:
             NAME=$(echo "$pkg" | jq -r '.name')
             VERSION=$(echo "$pkg" | jq -r '.version')
             TAG="${NAME}@${VERSION}"
-            gh release create "$TAG" --generate-notes --title "${NAME} v${VERSION}"
+            gh release create "$TAG" --generate-notes --title "${NAME} v${VERSION}" || echo "Release ${TAG} already exists, skipping"
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
