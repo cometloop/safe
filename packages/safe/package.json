@@ -4,7 +4,8 @@
   "description": "Zero-dependency, type-safe error handling using a result pattern for TypeScript",
   "author": "cometloop",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "license": "MIT",
   "repository": {
