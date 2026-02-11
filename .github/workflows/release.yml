@@ -25,6 +25,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
 
       - run: pnpm install --frozen-lockfile
 
@@ -36,6 +37,7 @@ jobs:
           version: pnpm version-packages
         env:
           GITHUB_TOKEN: ${{ secrets.CHANGESETS_PAT }}
+          NPM_CONFIG_PROVENANCE: true
 
       - name: Create GitHub Releases
         if: steps.changesets.outputs.published == 'true'
