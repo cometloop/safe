@@ -20,7 +20,12 @@ const HOOK_KEYS: ReadonlySet<string> = new Set(Object.keys(HOOK_KEY_MAP))
 
 // Keys whose values must be functions when present and not undefined.
 const FUNCTION_HOOK_KEYS: ReadonlySet<string> = new Set([
-  'parseResult', 'onSuccess', 'onError', 'onSettled', 'onHookError', 'onRetry',
+  'parseResult',
+  'onSuccess',
+  'onError',
+  'onSettled',
+  'onHookError',
+  'onRetry',
 ])
 
 // Type guard to distinguish hooks object from parseError function.
@@ -29,7 +34,8 @@ const FUNCTION_HOOK_KEYS: ReadonlySet<string> = new Set([
 const isHooks = <T, E, TContext extends unknown[]>(
   arg: unknown
 ): arg is SafeHooks<T, E, TContext> => {
-  if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) return false
+  if (typeof arg !== 'object' || arg === null || Array.isArray(arg))
+    return false
   const keys = Object.keys(arg)
   if (keys.length === 0) return false
 
@@ -84,7 +90,7 @@ const callParseError = <E>(
   e: unknown,
   parseError: ((e: unknown) => E) | undefined,
   onHookError?: (error: unknown, hookName: string) => void,
-  defaultError?: E,
+  defaultError?: E
 ): E => {
   if (!parseError) return toError(e) as E
   try {
@@ -103,7 +109,7 @@ const callParseError = <E>(
 // so they are routed through the standard error path (parseError → onError → err).
 const callParseResult = <T, TOut>(
   parseResult: ((response: T) => TOut) | undefined,
-  rawResult: T,
+  rawResult: T
 ): TOut => {
   if (!parseResult) return rawResult as unknown as TOut
   return parseResult(rawResult)
@@ -121,14 +127,16 @@ const sanitiseRetryTimes = (times: number | undefined): number => {
 const validateAbortAfter = (ms: number | undefined): number | undefined => {
   if (ms === undefined) return undefined
   if (!Number.isFinite(ms) || ms < 0) {
-    throw new RangeError(`abortAfter must be a non-negative finite number, got ${ms}`)
+    throw new RangeError(
+      `abortAfter must be a non-negative finite number, got ${ms}`
+    )
   }
   return ms
 }
 
 // Helper for async delays
 const sleep = (ms: number): Promise<void> =>
-  new Promise(resolve => setTimeout(resolve, ms))
+  new Promise((resolve) => setTimeout(resolve, ms))
 
 // Helper to wrap a promise with timeout.
 // Uses Promise.race + finally so the timer is always cleaned up,
@@ -213,13 +221,34 @@ function safeSync<T, E = Error, TOut = T>(
   try {
     const rawResult = fn()
     const result = callParseResult(resolvedHooks?.parseResult, rawResult)
-    callHook(() => resolvedHooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
-    callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
+    callHook(
+      () => resolvedHooks?.onSuccess?.(result, context),
+      onHookError,
+      'onSuccess'
+    )
+    callHook(
+      () => resolvedHooks?.onSettled?.(result, null, context),
+      onHookError,
+      'onSettled'
+    )
     return ok(result)
   } catch (e) {
-    const error = callParseError(e, parseError, onHookError, resolvedHooks?.defaultError)
-    callHook(() => resolvedHooks?.onError?.(error, context), onHookError, 'onError')
-    callHook(() => resolvedHooks?.onSettled?.(null, error, context), onHookError, 'onSettled')
+    const error = callParseError(
+      e,
+      parseError,
+      onHookError,
+      resolvedHooks?.defaultError
+    )
+    callHook(
+      () => resolvedHooks?.onError?.(error, context),
+      onHookError,
+      'onError'
+    )
+    callHook(
+      () => resolvedHooks?.onSettled?.(null, error, context),
+      onHookError,
+      'onSettled'
+    )
     return err(error)
   }
 }
@@ -249,7 +278,9 @@ function safeSync<T, E = Error, TOut = T>(
  * )
  * ```
  */
-function safeAsync<T>(fn: (signal?: AbortSignal) => Promise<T>): Promise<SafeResult<T, Error>>
+function safeAsync<T>(
+  fn: (signal?: AbortSignal) => Promise<T>
+): Promise<SafeResult<T, Error>>
 function safeAsync<T, TOut = T>(
   fn: (signal?: AbortSignal) => Promise<T>,
   hooks: SafeAsyncHooks<T, Error, [], TOut>
@@ -286,7 +317,8 @@ async function safeAsync<T, E = Error, TOut = T>(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Create a fresh AbortController for each attempt if timeout is configured
-    const controller = abortAfter !== undefined ? new AbortController() : undefined
+    const controller =
+      abortAfter !== undefined ? new AbortController() : undefined
 
     try {
       let promise = fn(controller?.signal)
@@ -298,15 +330,32 @@ async function safeAsync<T, E = Error, TOut = T>(
 
       const rawResult = await promise
       const result = callParseResult(resolvedHooks?.parseResult, rawResult)
-      callHook(() => resolvedHooks?.onSuccess?.(result, context), onHookError, 'onSuccess')
-      callHook(() => resolvedHooks?.onSettled?.(result, null, context), onHookError, 'onSettled')
+      callHook(
+        () => resolvedHooks?.onSuccess?.(result, context),
+        onHookError,
+        'onSuccess'
+      )
+      callHook(
+        () => resolvedHooks?.onSettled?.(result, null, context),
+        onHookError,
+        'onSettled'
+      )
       return ok(result)
     } catch (e) {
-      lastError = callParseError(e, parseError, onHookError, resolvedHooks?.defaultError)
+      lastError = callParseError(
+        e,
+        parseError,
+        onHookError,
+        resolvedHooks?.defaultError
+      )
 
       // If not the last attempt, call onRetry and potentially wait
       if (attempt < maxAttempts) {
-        callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, context), onHookError, 'onRetry')
+        callHook(
+          () => resolvedHooks?.onRetry?.(lastError, attempt, context),
+          onHookError,
+          'onRetry'
+        )
         const waitMs = resolvedHooks?.retry?.waitBefore?.(attempt) ?? 0
         if (waitMs > 0 && Number.isFinite(waitMs)) {
           await sleep(waitMs)
@@ -315,8 +364,16 @@ async function safeAsync<T, E = Error, TOut = T>(
     }
   }
 
-  callHook(() => resolvedHooks?.onError?.(lastError, context), onHookError, 'onError')
-  callHook(() => resolvedHooks?.onSettled?.(null, lastError, context), onHookError, 'onSettled')
+  callHook(
+    () => resolvedHooks?.onError?.(lastError, context),
+    onHookError,
+    'onError'
+  )
+  callHook(
+    () => resolvedHooks?.onSettled?.(null, lastError, context),
+    onHookError,
+    'onSettled'
+  )
   return err(lastError)
 }
 
@@ -384,13 +441,34 @@ function wrap<TArgs extends unknown[], T, E = Error, TOut = T>(
     try {
       const rawResult = fn.call(this, ...args)
       const result = callParseResult(resolvedHooks?.parseResult, rawResult)
-      callHook(() => resolvedHooks?.onSuccess?.(result, args), onHookError, 'onSuccess')
-      callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
+      callHook(
+        () => resolvedHooks?.onSuccess?.(result, args),
+        onHookError,
+        'onSuccess'
+      )
+      callHook(
+        () => resolvedHooks?.onSettled?.(result, null, args),
+        onHookError,
+        'onSettled'
+      )
       return ok(result)
     } catch (e) {
-      const error = callParseError(e, parseError, onHookError, resolvedHooks?.defaultError)
-      callHook(() => resolvedHooks?.onError?.(error, args), onHookError, 'onError')
-      callHook(() => resolvedHooks?.onSettled?.(null, error, args), onHookError, 'onSettled')
+      const error = callParseError(
+        e,
+        parseError,
+        onHookError,
+        resolvedHooks?.defaultError
+      )
+      callHook(
+        () => resolvedHooks?.onError?.(error, args),
+        onHookError,
+        'onError'
+      )
+      callHook(
+        () => resolvedHooks?.onSettled?.(null, error, args),
+        onHookError,
+        'onSettled'
+      )
       return err(error)
     }
   }
@@ -481,7 +559,8 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // Create a fresh AbortController for each attempt if timeout is configured
-      const controller = abortAfter !== undefined ? new AbortController() : undefined
+      const controller =
+        abortAfter !== undefined ? new AbortController() : undefined
 
       try {
         let promise = fn.call(this, ...args)
@@ -493,15 +572,32 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
 
         const rawResult = await promise
         const result = callParseResult(resolvedHooks?.parseResult, rawResult)
-        callHook(() => resolvedHooks?.onSuccess?.(result, args), onHookError, 'onSuccess')
-        callHook(() => resolvedHooks?.onSettled?.(result, null, args), onHookError, 'onSettled')
+        callHook(
+          () => resolvedHooks?.onSuccess?.(result, args),
+          onHookError,
+          'onSuccess'
+        )
+        callHook(
+          () => resolvedHooks?.onSettled?.(result, null, args),
+          onHookError,
+          'onSettled'
+        )
         return ok(result)
       } catch (e) {
-        lastError = callParseError(e, parseError, onHookError, resolvedHooks?.defaultError)
+        lastError = callParseError(
+          e,
+          parseError,
+          onHookError,
+          resolvedHooks?.defaultError
+        )
 
         // If not the last attempt, call onRetry and potentially wait
         if (attempt < maxAttempts) {
-          callHook(() => resolvedHooks?.onRetry?.(lastError, attempt, args), onHookError, 'onRetry')
+          callHook(
+            () => resolvedHooks?.onRetry?.(lastError, attempt, args),
+            onHookError,
+            'onRetry'
+          )
           const waitMs = resolvedHooks?.retry?.waitBefore?.(attempt) ?? 0
           if (waitMs > 0 && Number.isFinite(waitMs)) {
             await sleep(waitMs)
@@ -510,8 +606,16 @@ function wrapAsync<TArgs extends unknown[], T, E = Error, TOut = T>(
       }
     }
 
-    callHook(() => resolvedHooks?.onError?.(lastError, args), onHookError, 'onError')
-    callHook(() => resolvedHooks?.onSettled?.(null, lastError, args), onHookError, 'onSettled')
+    callHook(
+      () => resolvedHooks?.onError?.(lastError, args),
+      onHookError,
+      'onError'
+    )
+    callHook(
+      () => resolvedHooks?.onSettled?.(null, lastError, args),
+      onHookError,
+      'onSettled'
+    )
     return err(lastError)
   }
 }
@@ -541,11 +645,15 @@ function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
   promises: T
 ): Promise<
   SafeResult<
-    { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never },
+    {
+      [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never
+    },
     T[keyof T] extends Promise<SafeResult<any, infer E>> ? E : never
   >
 > {
-  type Values = { [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never }
+  type Values = {
+    [K in keyof T]: T[K] extends Promise<SafeResult<infer V, any>> ? V : never
+  }
   type Err = T[keyof T] extends Promise<SafeResult<any, infer E>> ? E : never
 
   const keys = Object.keys(promises)
@@ -590,7 +698,7 @@ function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
           if (done) return
           done = true
           resolve(err(toError(rejection)) as SafeResult<Values, Err>)
-        },
+        }
       )
     }
   })
@@ -619,17 +727,17 @@ function safeAll<T extends Record<string, Promise<SafeResult<any, any>>>>(
  * }
  * ```
  */
-async function safeAllSettled<T extends Record<string, Promise<SafeResult<any, any>>>>(
-  promises: T
-): Promise<{ [K in keyof T]: Awaited<T[K]> }> {
+async function safeAllSettled<
+  T extends Record<string, Promise<SafeResult<any, any>>>,
+>(promises: T): Promise<{ [K in keyof T]: Awaited<T[K]> }> {
   type Settled = { [K in keyof T]: Awaited<T[K]> }
 
   const keys = Object.keys(promises)
   const values = Object.values(promises)
   const results = await Promise.all(
     values.map((p) =>
-      p.catch((rejection): SafeResult<unknown, Error> =>
-        err(toError(rejection))
+      p.catch(
+        (rejection): SafeResult<unknown, Error> => err(toError(rejection))
       )
     )
   )
@@ -652,4 +760,14 @@ export const safe = {
 } as const
 
 // Export individual functions for use by createSafe
-export { safeSync, safeAsync, wrap, wrapAsync, safeAll, safeAllSettled, callHook, toError, callParseError }
+export {
+  safeSync,
+  safeAsync,
+  wrap,
+  wrapAsync,
+  safeAll,
+  safeAllSettled,
+  callHook,
+  toError,
+  callParseError,
+}

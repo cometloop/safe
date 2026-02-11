@@ -2,9 +2,12 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
-    "dev": "concurrently -n \"turbo,stripe\" \"turbo run dev\" \"stripe listen --forward-to http://localhost:4000/api/auth/stripe/webhook\"",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
     "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

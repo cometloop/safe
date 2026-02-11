@@ -54,15 +54,15 @@ export function PlaygroundPanel({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2">
-        <div className="border-b border-slate-200 p-4 sm:border-b-0 sm:border-r dark:border-slate-800">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <div className="border-b border-slate-200 p-4 sm:border-r sm:border-b-0 dark:border-slate-800">
+          <p className="mb-2 text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400">
             Controls
           </p>
           <div className="flex flex-wrap gap-2">{controls}</div>
         </div>
 
         <div className="p-4">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <p className="mb-2 text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400">
             Output
           </p>
           <div
@@ -141,7 +141,9 @@ export function DemoInput({
   className?: string
 }) {
   return (
-    <label className={`flex ${multiline ? 'flex-col' : 'items-center'} gap-2 text-xs ${className ?? ''}`}>
+    <label
+      className={`flex ${multiline ? 'flex-col' : 'items-center'} gap-2 text-xs ${className ?? ''}`}
+    >
       <span className="text-slate-600 dark:text-slate-400">{label}</span>
       {multiline ? (
         <textarea

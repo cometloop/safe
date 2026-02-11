@@ -48,16 +48,16 @@ const [user, error] = await safe.async(() => fetchUser(id))
 
 ## API
 
-| Method | Description |
-| --- | --- |
-| `createSafe(config)` | Create a pre-configured instance — the recommended entry point |
-| `safe.wrap(fn)` | Wrap a sync function to return `SafeResult` |
-| `safe.wrapAsync(fn)` | Wrap an async function to return `Promise<SafeResult>` |
-| `safe.sync(fn)` | Execute a sync function, return `SafeResult` |
-| `safe.async(fn)` | Execute an async function, return `Promise<SafeResult>` |
-| `safe.all({...})` | Run multiple async operations in parallel, return all or first error |
-| `safe.allSettled({...})` | Run multiple async operations in parallel, return all individual results |
-| `withObjects(...)` | Convert any result, function, or instance to object-style `{ ok, data, error }` |
+| Method                   | Description                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------- |
+| `createSafe(config)`     | Create a pre-configured instance — the recommended entry point                  |
+| `safe.wrap(fn)`          | Wrap a sync function to return `SafeResult`                                     |
+| `safe.wrapAsync(fn)`     | Wrap an async function to return `Promise<SafeResult>`                          |
+| `safe.sync(fn)`          | Execute a sync function, return `SafeResult`                                    |
+| `safe.async(fn)`         | Execute an async function, return `Promise<SafeResult>`                         |
+| `safe.all({...})`        | Run multiple async operations in parallel, return all or first error            |
+| `safe.allSettled({...})` | Run multiple async operations in parallel, return all individual results        |
+| `withObjects(...)`       | Convert any result, function, or instance to object-style `{ ok, data, error }` |
 
 All methods support optional `parseError` for custom error types, `parseResult` for result transformation, and lifecycle hooks (`onSuccess`, `onError`, `onSettled`, `onHookError`). Async methods additionally support `retry`, `abortAfter` (timeout), and `onRetry`.
 

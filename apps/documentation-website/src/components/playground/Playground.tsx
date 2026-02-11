@@ -21,15 +21,9 @@ function useLog() {
     setLog([])
   }, [])
 
-  const append = useCallback(
-    (type: LogEntry['type'], message: string) => {
-      setLog((prev) => [
-        ...prev,
-        { type, message, timestamp: Date.now() },
-      ])
-    },
-    [],
-  )
+  const append = useCallback((type: LogEntry['type'], message: string) => {
+    setLog((prev) => [...prev, { type, message, timestamp: Date.now() }])
+  }, [])
 
   return { log, clear, append }
 }
@@ -226,18 +220,8 @@ if (error) {
       log={log}
       controls={
         <>
-          <DemoInput
-            label="a"
-            value={a}
-            onChange={setA}
-            type="number"
-          />
-          <DemoInput
-            label="b"
-            value={b}
-            onChange={setB}
-            type="number"
-          />
+          <DemoInput label="a" value={a} onChange={setA} type="number" />
+          <DemoInput label="b" value={b} onChange={setB} type="number" />
           <DemoButton onClick={() => run(Number(a), Number(b))}>
             Divide
           </DemoButton>
@@ -639,7 +623,10 @@ const [data, error] = await safeFlakyOperation()`
     const target = Number(succeedOn)
     const retries = Number(maxRetries)
 
-    append('info', `Will succeed on attempt #${target}, max retries: ${retries}`)
+    append(
+      'info',
+      `Will succeed on attempt #${target}, max retries: ${retries}`,
+    )
 
     const safeFlakyOperation = safe.wrapAsync(
       async () => {
@@ -1016,9 +1003,7 @@ if (error) {
           code: 'OPERATION_ERROR',
           message: e instanceof Error ? e.message : String(e),
           originalType:
-            typeof e === 'object' && e instanceof Error
-              ? 'Error'
-              : typeof e,
+            typeof e === 'object' && e instanceof Error ? 'Error' : typeof e,
         }),
       )
 
@@ -1128,8 +1113,7 @@ if (error) {
         }
       } else {
         const safeParse = safe.wrap(parseInput, {
-          parseResult: (data) =>
-            data.users.map((u) => u.name.toUpperCase()),
+          parseResult: (data) => data.users.map((u) => u.name.toUpperCase()),
           onSuccess: (transformedResult) => {
             append(
               'info',
@@ -1246,9 +1230,7 @@ const [user, asyncError] = await safeFetchUser()`
           : undefined,
       })
 
-      const safeParseConfig = appSafe.wrap(() =>
-        JSON.parse('{"status": "ok"}'),
-      )
+      const safeParseConfig = appSafe.wrap(() => JSON.parse('{"status": "ok"}'))
       const [data, error] = safeParseConfig()
       if (error) {
         append('error', `Error: ${JSON.stringify(error)}`)
@@ -1282,10 +1264,7 @@ const [user, asyncError] = await safeFetchUser()`
 
     const safeFetchUser = appSafe.wrapAsync(async () => {
       return new Promise<never>((_, reject) => {
-        setTimeout(
-          () => reject(new Error('Network error: ECONNREFUSED')),
-          800,
-        )
+        setTimeout(() => reject(new Error('Network error: ECONNREFUSED')), 800)
       })
     })
 

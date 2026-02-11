@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  safe,
-  createSafe,
-  ok,
-  err,
-  TimeoutError,
-} from './index'
+import { safe, createSafe, ok, err, TimeoutError } from './index'
 
 describe('safe/index re-exports', () => {
   it('exports safe object', () => {

@@ -5,10 +5,7 @@ import {
   withObjects,
   okObj,
   errObj,
-  type SafeOkObj,
-  type SafeErrObj,
   type SafeResultObj,
-  type SafeObjectInstance,
 } from './index'
 
 describe('withObjects', () => {
@@ -20,7 +17,11 @@ describe('withObjects', () => {
     })
 
     it('converts an error tuple to { ok: false, data: null, error }', () => {
-      const result = withObjects(safe.sync(() => { throw new Error('boom') }))
+      const result = withObjects(
+        safe.sync(() => {
+          throw new Error('boom')
+        })
+      )
 
       expect(result.ok).toBe(false)
       expect(result.data).toBeNull()
@@ -60,8 +61,10 @@ describe('withObjects', () => {
     it('works with custom parseError', () => {
       const result = withObjects(
         safe.sync(
-          () => { throw new Error('oops') },
-          (e) => String(e),
+          () => {
+            throw new Error('oops')
+          },
+          (e) => String(e)
         )
       )
 
@@ -107,7 +110,9 @@ describe('withObjects', () => {
         defaultError: 'unknown',
       })
 
-      const result = await withObjects(appSafe.async(() => Promise.resolve('data')))
+      const result = await withObjects(
+        appSafe.async(() => Promise.resolve('data'))
+      )
 
       expect(result).toEqual({ ok: true, data: 'data', error: null })
     })
@@ -196,7 +201,9 @@ describe('withObjects', () => {
 
     it('sync error returns object result', () => {
       const objSafe = withObjects(appSafe)
-      const result = objSafe.sync(() => { throw new Error('sync fail') })
+      const result = objSafe.sync(() => {
+        throw new Error('sync fail')
+      })
 
       expect(result).toEqual({ ok: false, data: null, error: 'sync fail' })
     })
@@ -210,7 +217,9 @@ describe('withObjects', () => {
 
     it('async error returns object result', async () => {
       const objSafe = withObjects(appSafe)
-      const result = await objSafe.async(() => Promise.reject(new Error('async fail')))
+      const result = await objSafe.async(() =>
+        Promise.reject(new Error('async fail'))
+      )
 
       expect(result).toEqual({ ok: false, data: null, error: 'async fail' })
     })
@@ -219,7 +228,11 @@ describe('withObjects', () => {
       const objSafe = withObjects(appSafe)
       const safeParse = objSafe.wrap(JSON.parse)
 
-      expect(safeParse('{"x":1}')).toEqual({ ok: true, data: { x: 1 }, error: null })
+      expect(safeParse('{"x":1}')).toEqual({
+        ok: true,
+        data: { x: 1 },
+        error: null,
+      })
       const failure = safeParse('bad')
       expect(failure.ok).toBe(false)
       expect(failure.data).toBeNull()
@@ -289,7 +302,9 @@ describe('withObjects', () => {
       expect(onSuccess).toHaveBeenCalledWith(42)
       expect(onSettled).toHaveBeenCalledWith(42, null)
 
-      objSafe.sync(() => { throw new Error('test') })
+      objSafe.sync(() => {
+        throw new Error('test')
+      })
       expect(onError).toHaveBeenCalled()
       expect(onSettled).toHaveBeenCalledTimes(2)
     })
@@ -366,10 +381,12 @@ describe('withObjects', () => {
 
   describe('wrapping standalone safe.all', () => {
     it('converts safe.all success to object result', async () => {
-      const result = await withObjects(safe.all({
-        a: safe.async(() => Promise.resolve(1)),
-        b: safe.async(() => Promise.resolve('two')),
-      }))
+      const result = await withObjects(
+        safe.all({
+          a: safe.async(() => Promise.resolve(1)),
+          b: safe.async(() => Promise.resolve('two')),
+        })
+      )
 
       expect(result.ok).toBe(true)
       expect(result.data).toEqual({ a: 1, b: 'two' })
@@ -377,10 +394,12 @@ describe('withObjects', () => {
     })
 
     it('converts safe.all error to object result', async () => {
-      const result = await withObjects(safe.all({
-        a: safe.async(() => Promise.resolve(1)),
-        b: safe.async(() => Promise.reject(new Error('b failed'))),
-      }))
+      const result = await withObjects(
+        safe.all({
+          a: safe.async(() => Promise.resolve(1)),
+          b: safe.async(() => Promise.reject(new Error('b failed'))),
+        })
+      )
 
       expect(result.ok).toBe(false)
       expect(result.data).toBeNull()

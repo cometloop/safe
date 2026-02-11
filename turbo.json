@@ -20,6 +20,19 @@
         "vitest.config.ts"
       ]
     },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
+        "vitest.config.ts"
+      ]
+    },
     "dev": {
       "dependsOn": ["^build"],
       "cache": false,

@@ -77,16 +77,18 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
       {isHomePage && <Hero />}
 
-      <div className={clsx(
-        'relative mx-auto flex w-full flex-auto justify-center',
-        isCollapsed
-          ? 'max-w-none'
-          : 'max-w-8xl sm:px-2 lg:px-8 xl:px-12',
-      )}>
-        <div className={clsx(
-          'hidden lg:relative lg:block lg:flex-none',
-          isCollapsed && 'lg:hidden',
-        )}>
+      <div
+        className={clsx(
+          'relative mx-auto flex w-full flex-auto justify-center',
+          isCollapsed ? 'max-w-none' : 'max-w-8xl sm:px-2 lg:px-8 xl:px-12',
+        )}
+      >
+        <div
+          className={clsx(
+            'hidden lg:relative lg:block lg:flex-none',
+            isCollapsed && 'lg:hidden',
+          )}
+        >
           <div className="absolute inset-y-0 right-0 w-[50vw] bg-slate-50 dark:hidden" />
           <div className="absolute top-16 right-0 bottom-0 hidden h-12 w-px bg-linear-to-t from-slate-800 dark:block" />
           <div className="absolute top-28 right-0 bottom-0 hidden w-px bg-slate-800 dark:block" />

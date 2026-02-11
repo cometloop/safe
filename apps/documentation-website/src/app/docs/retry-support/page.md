@@ -167,11 +167,12 @@ const [result, error] = await apiSafe.async(() => oneTimeOperation(), {
 ```
 
 {% callout title="Hook merging" type="note" %}
+
 - `onSuccess`: Default hook called first, then per-call hook
 - `onError`: Default hook called first, then per-call hook
 - `onRetry`: Default hook called first, then per-call hook
 - `retry`: Per-call config **completely overrides** default config (not merged)
-{% /callout %}
+  {% /callout %}
 
 ---
 

@@ -102,7 +102,12 @@ export type SafeHooks<T, E, TContext extends unknown[] = [], TOut = T> = {
 }
 
 // Extended hooks for async operations with retry and timeout support
-export type SafeAsyncHooks<T, E, TContext extends unknown[] = [], TOut = T> = SafeHooks<T, E, TContext, TOut> & {
+export type SafeAsyncHooks<
+  T,
+  E,
+  TContext extends unknown[] = [],
+  TOut = T,
+> = SafeHooks<T, E, TContext, TOut> & {
   onRetry?: (error: E, attempt: number, context: TContext) => void
   retry?: RetryConfig
   abortAfter?: number // timeout in milliseconds
@@ -161,11 +166,19 @@ export type SafeInstance<E, TResult = never> = {
     fn: (signal?: AbortSignal) => Promise<T>,
     hooks?: SafeAsyncHooks<T, E, [], TOut>
   ) => Promise<SafeResult<TOut, E>>
-  wrap: <TArgs extends unknown[], T, TOut = [TResult] extends [never] ? T : TResult>(
+  wrap: <
+    TArgs extends unknown[],
+    T,
+    TOut = [TResult] extends [never] ? T : TResult,
+  >(
     fn: (...args: TArgs) => T,
     hooks?: SafeHooks<T, E, TArgs, TOut>
   ) => (...args: TArgs) => SafeResult<TOut, E>
-  wrapAsync: <TArgs extends unknown[], T, TOut = [TResult] extends [never] ? T : TResult>(
+  wrapAsync: <
+    TArgs extends unknown[],
+    T,
+    TOut = [TResult] extends [never] ? T : TResult,
+  >(
     fn: (...args: TArgs) => Promise<T>,
     hooks?: SafeAsyncHooks<T, E, TArgs, TOut>
   ) => (...args: TArgs) => Promise<SafeResult<TOut, E>>
@@ -173,19 +186,26 @@ export type SafeInstance<E, TResult = never> = {
     fns: T
   ) => Promise<
     SafeResult<
-      { [K in keyof T]: [TResult] extends [never]
-        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
-        : TResult
+      {
+        [K in keyof T]: [TResult] extends [never]
+          ? T[K] extends (signal?: AbortSignal) => Promise<infer V>
+            ? V
+            : never
+          : TResult
       },
       E
     >
   >
-  allSettled: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(
+  allSettled: <
+    T extends Record<string, (signal?: AbortSignal) => Promise<any>>,
+  >(
     fns: T
   ) => Promise<{
     [K in keyof T]: SafeResult<
       [TResult] extends [never]
-        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
+        ? T[K] extends (signal?: AbortSignal) => Promise<infer V>
+          ? V
+          : never
         : TResult,
       E
     >
@@ -205,26 +225,46 @@ export type SafeObjectInstance<E, TResult = never> = {
     fn: (signal?: AbortSignal) => Promise<T>,
     hooks?: SafeAsyncHooks<T, E, [], TOut>
   ) => Promise<SafeResultObj<TOut, E>>
-  wrap: <TArgs extends unknown[], T, TOut = [TResult] extends [never] ? T : TResult>(
+  wrap: <
+    TArgs extends unknown[],
+    T,
+    TOut = [TResult] extends [never] ? T : TResult,
+  >(
     fn: (...args: TArgs) => T,
     hooks?: SafeHooks<T, E, TArgs, TOut>
   ) => (...args: TArgs) => SafeResultObj<TOut, E>
-  wrapAsync: <TArgs extends unknown[], T, TOut = [TResult] extends [never] ? T : TResult>(
+  wrapAsync: <
+    TArgs extends unknown[],
+    T,
+    TOut = [TResult] extends [never] ? T : TResult,
+  >(
     fn: (...args: TArgs) => Promise<T>,
     hooks?: SafeAsyncHooks<T, E, TArgs, TOut>
   ) => (...args: TArgs) => Promise<SafeResultObj<TOut, E>>
-  all: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(fns: T) => Promise<
+  all: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(
+    fns: T
+  ) => Promise<
     SafeResultObj<
-      { [K in keyof T]: [TResult] extends [never]
-        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
-        : TResult },
+      {
+        [K in keyof T]: [TResult] extends [never]
+          ? T[K] extends (signal?: AbortSignal) => Promise<infer V>
+            ? V
+            : never
+          : TResult
+      },
       E
     >
   >
-  allSettled: <T extends Record<string, (signal?: AbortSignal) => Promise<any>>>(fns: T) => Promise<{
+  allSettled: <
+    T extends Record<string, (signal?: AbortSignal) => Promise<any>>,
+  >(
+    fns: T
+  ) => Promise<{
     [K in keyof T]: SafeResultObj<
       [TResult] extends [never]
-        ? (T[K] extends (signal?: AbortSignal) => Promise<infer V> ? V : never)
+        ? T[K] extends (signal?: AbortSignal) => Promise<infer V>
+          ? V
+          : never
         : TResult,
       E
     >

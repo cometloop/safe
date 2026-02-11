@@ -3,8 +3,6 @@ import {
   createSafe,
   TimeoutError,
   type SafeResult,
-  type SafeHooks,
-  type SafeAsyncHooks,
   type CreateSafeConfig,
   type SafeInstance,
 } from './index'
@@ -34,7 +32,11 @@ describe('createSafe', () => {
           message: e instanceof Error ? e.message : 'Unknown error',
           originalError: e,
         }),
-        defaultError: { code: 'UNKNOWN_ERROR' as const, message: 'unknown error', originalError: null },
+        defaultError: {
+          code: 'UNKNOWN_ERROR' as const,
+          message: 'unknown error',
+          originalError: null,
+        },
       })
 
       const [, error] = appSafe.sync(() => {
@@ -126,7 +128,10 @@ describe('createSafe', () => {
         original: e,
       }))
 
-      const appSafe = createSafe({ parseError, defaultError: { mapped: true, original: null } })
+      const appSafe = createSafe({
+        parseError,
+        defaultError: { mapped: true, original: null },
+      })
 
       appSafe.sync(() => {
         throw new Error('test')
@@ -156,7 +161,10 @@ describe('createSafe', () => {
       expect(appSafe.sync(() => true)).toEqual([true, null])
       expect(appSafe.sync(() => null)).toEqual([null, null])
       expect(appSafe.sync(() => undefined)).toEqual([undefined, null])
-      expect(appSafe.sync(() => ({ foo: 'bar' }))).toEqual([{ foo: 'bar' }, null])
+      expect(appSafe.sync(() => ({ foo: 'bar' }))).toEqual([
+        { foo: 'bar' },
+        null,
+      ])
       expect(appSafe.sync(() => [1, 2, 3])).toEqual([[1, 2, 3], null])
     })
 
@@ -166,12 +174,36 @@ describe('createSafe', () => {
         defaultError: { value: null },
       })
 
-      expect(appSafe.sync(() => { throw new Error('err') })[1]).toEqual({ value: expect.any(Error) })
-      expect(appSafe.sync(() => { throw 'string' })[1]).toEqual({ value: 'string' })
-      expect(appSafe.sync(() => { throw 404 })[1]).toEqual({ value: 404 })
-      expect(appSafe.sync(() => { throw { code: 'ERR' } })[1]).toEqual({ value: { code: 'ERR' } })
-      expect(appSafe.sync(() => { throw undefined })[1]).toEqual({ value: undefined })
-      expect(appSafe.sync(() => { throw null })[1]).toEqual({ value: null })
+      expect(
+        appSafe.sync(() => {
+          throw new Error('err')
+        })[1]
+      ).toEqual({ value: expect.any(Error) })
+      expect(
+        appSafe.sync(() => {
+          throw 'string'
+        })[1]
+      ).toEqual({ value: 'string' })
+      expect(
+        appSafe.sync(() => {
+          throw 404
+        })[1]
+      ).toEqual({ value: 404 })
+      expect(
+        appSafe.sync(() => {
+          throw { code: 'ERR' }
+        })[1]
+      ).toEqual({ value: { code: 'ERR' } })
+      expect(
+        appSafe.sync(() => {
+          throw undefined
+        })[1]
+      ).toEqual({ value: undefined })
+      expect(
+        appSafe.sync(() => {
+          throw null
+        })[1]
+      ).toEqual({ value: null })
     })
   })
 
@@ -195,7 +227,9 @@ describe('createSafe', () => {
         defaultError: { statusCode: 0, message: 'unknown error' },
       })
 
-      const result = await appSafe.async(() => Promise.reject(new Error('async fail')))
+      const result = await appSafe.async(() =>
+        Promise.reject(new Error('async fail'))
+      )
 
       expect(result[0]).toBeNull()
       expect(result[1]).toEqual({ statusCode: 500, message: 'async fail' })
@@ -277,7 +311,10 @@ describe('createSafe', () => {
 
       expect(safeDivide(10, 2)).toEqual([5, null])
       expect(safeDivide(20, 4)).toEqual([5, null])
-      expect(safeDivide(10, 0)).toEqual([null, { error: true, msg: 'Division by zero' }])
+      expect(safeDivide(10, 0)).toEqual([
+        null,
+        { error: true, msg: 'Division by zero' },
+      ])
     })
 
     it('wraps JSON.parse with configured error mapping', () => {
@@ -286,12 +323,18 @@ describe('createSafe', () => {
           type: 'parse_error' as const,
           message: e instanceof Error ? e.message : 'Parse failed',
         }),
-        defaultError: { type: 'parse_error' as const, message: 'unknown error' },
+        defaultError: {
+          type: 'parse_error' as const,
+          message: 'unknown error',
+        },
       })
 
       const safeJsonParse = appSafe.wrap(JSON.parse)
 
-      expect(safeJsonParse('{"name": "test"}')).toEqual([{ name: 'test' }, null])
+      expect(safeJsonParse('{"name": "test"}')).toEqual([
+        { name: 'test' },
+        null,
+      ])
       const [, error] = safeJsonParse('{invalid}')
       expect(error?.type).toBe('parse_error')
       expect(typeof error?.message).toBe('string')
@@ -328,7 +371,10 @@ describe('createSafe', () => {
 
       const safeValidate = appSafe.wrap(validateUser)
 
-      expect(safeValidate({ id: 1, name: 'John' })).toEqual([{ id: 1, name: 'John' }, null])
+      expect(safeValidate({ id: 1, name: 'John' })).toEqual([
+        { id: 1, name: 'John' },
+        null,
+      ])
       expect(safeValidate({ id: 1, name: '' })[0]).toBeNull()
       expect(safeValidate({ id: 0, name: 'John' })[0]).toBeNull()
     })
@@ -351,7 +397,10 @@ describe('createSafe', () => {
           code: 'FETCH_ERROR' as const,
           message: e instanceof Error ? e.message : 'Unknown',
         }),
-        defaultError: { code: 'FETCH_ERROR' as const, message: 'unknown error' },
+        defaultError: {
+          code: 'FETCH_ERROR' as const,
+          message: 'unknown error',
+        },
       })
 
       const fetchUser = async (id: number) => {
@@ -363,7 +412,10 @@ describe('createSafe', () => {
 
       expect(await safeFetch(1)).toEqual([{ id: 1, name: 'User 1' }, null])
       expect(await safeFetch(42)).toEqual([{ id: 42, name: 'User 42' }, null])
-      expect(await safeFetch(-1)).toEqual([null, { code: 'FETCH_ERROR', message: 'Invalid ID' }])
+      expect(await safeFetch(-1)).toEqual([
+        null,
+        { code: 'FETCH_ERROR', message: 'Invalid ID' },
+      ])
     })
 
     it('wraps async functions with multiple parameters', async () => {
@@ -375,7 +427,10 @@ describe('createSafe', () => {
         defaultError: { status: 0, error: 'unknown error' },
       })
 
-      const postData = async (endpoint: string, body: Record<string, unknown>) => {
+      const postData = async (
+        endpoint: string,
+        body: Record<string, unknown>
+      ) => {
         if (!body.id) throw new Error('Missing required field: id')
         return { success: true, endpoint, body }
       }
@@ -383,7 +438,11 @@ describe('createSafe', () => {
       const safePost = appSafe.wrapAsync(postData)
 
       expect(await safePost('/api/users', { id: 1, name: 'John' })).toEqual([
-        { success: true, endpoint: '/api/users', body: { id: 1, name: 'John' } },
+        {
+          success: true,
+          endpoint: '/api/users',
+          body: { id: 1, name: 'John' },
+        },
         null,
       ])
 
@@ -441,7 +500,10 @@ describe('createSafe', () => {
       })
 
       expect(defaultOnError).toHaveBeenCalledTimes(1)
-      expect(defaultOnError).toHaveBeenCalledWith({ code: 'ERR', message: 'test error' })
+      expect(defaultOnError).toHaveBeenCalledWith({
+        code: 'ERR',
+        message: 'test error',
+      })
     })
 
     it('calls default onSuccess on successful async execution', async () => {
@@ -506,7 +568,9 @@ describe('createSafe', () => {
       const safeDivide = appSafe.wrap(divide)
       safeDivide(10, 0)
 
-      expect(defaultOnError).toHaveBeenCalledWith({ msg: 'Error: Division by zero' })
+      expect(defaultOnError).toHaveBeenCalledWith({
+        msg: 'Error: Division by zero',
+      })
     })
 
     it('calls default onSuccess on wrapped async function success', async () => {
@@ -539,7 +603,10 @@ describe('createSafe', () => {
       })
       await safeFetch(-1)
 
-      expect(defaultOnError).toHaveBeenCalledWith({ code: 'ERR', msg: 'Error: Invalid ID' })
+      expect(defaultOnError).toHaveBeenCalledWith({
+        code: 'ERR',
+        msg: 'Error: Invalid ID',
+      })
     })
 
     it('does not call default onError on success', () => {
@@ -619,7 +686,10 @@ describe('createSafe', () => {
         defaultError: 'unknown error',
       })
 
-      const safeDivide = appSafe.wrap((a: number, b: number) => a / b, { onSuccess, onError })
+      const safeDivide = appSafe.wrap((a: number, b: number) => a / b, {
+        onSuccess,
+        onError,
+      })
       safeDivide(10, 2)
 
       expect(onSuccess).toHaveBeenCalledWith(5, [10, 2])
@@ -635,7 +705,10 @@ describe('createSafe', () => {
         defaultError: 'unknown error',
       })
 
-      const safeFetch = appSafe.wrapAsync(async (id: number) => ({ id }), { onSuccess, onError })
+      const safeFetch = appSafe.wrapAsync(async (id: number) => ({ id }), {
+        onSuccess,
+        onError,
+      })
       await safeFetch(42)
 
       expect(onSuccess).toHaveBeenCalledWith({ id: 42 }, [42])
@@ -712,10 +785,15 @@ describe('createSafe', () => {
           onSettled: defaultOnSettled,
         })
 
-        appSafe.sync(() => { throw new Error('test error') })
+        appSafe.sync(() => {
+          throw new Error('test error')
+        })
 
         expect(defaultOnSettled).toHaveBeenCalledTimes(1)
-        expect(defaultOnSettled).toHaveBeenCalledWith(null, { code: 'ERR', message: 'test error' })
+        expect(defaultOnSettled).toHaveBeenCalledWith(null, {
+          code: 'ERR',
+          message: 'test error',
+        })
       })
 
       it('calls default onSettled on successful async execution', async () => {
@@ -745,7 +823,9 @@ describe('createSafe', () => {
         await appSafe.async(() => Promise.reject('async error'))
 
         expect(defaultOnSettled).toHaveBeenCalledTimes(1)
-        expect(defaultOnSettled).toHaveBeenCalledWith(null, { error: 'async error' })
+        expect(defaultOnSettled).toHaveBeenCalledWith(null, {
+          error: 'async error',
+        })
       })
 
       it('calls default onSettled on wrapped function success', () => {
@@ -780,7 +860,9 @@ describe('createSafe', () => {
         const safeDivide = appSafe.wrap(divide)
         safeDivide(10, 0)
 
-        expect(defaultOnSettled).toHaveBeenCalledWith(null, { msg: 'Error: Division by zero' })
+        expect(defaultOnSettled).toHaveBeenCalledWith(null, {
+          msg: 'Error: Division by zero',
+        })
       })
 
       it('calls default onSettled on wrapped async function success', async () => {
@@ -813,7 +895,10 @@ describe('createSafe', () => {
         })
         await safeFetch(-1)
 
-        expect(defaultOnSettled).toHaveBeenCalledWith(null, { code: 'ERR', msg: 'Error: Invalid ID' })
+        expect(defaultOnSettled).toHaveBeenCalledWith(null, {
+          code: 'ERR',
+          msg: 'Error: Invalid ID',
+        })
       })
     })
 
@@ -852,7 +937,9 @@ describe('createSafe', () => {
           defaultError: 'unknown error',
         })
 
-        const safeDivide = appSafe.wrap((a: number, b: number) => a / b, { onSettled })
+        const safeDivide = appSafe.wrap((a: number, b: number) => a / b, {
+          onSettled,
+        })
         safeDivide(10, 2)
 
         expect(onSettled).toHaveBeenCalledWith(5, null, [10, 2])
@@ -866,7 +953,9 @@ describe('createSafe', () => {
           defaultError: 'unknown error',
         })
 
-        const safeFetch = appSafe.wrapAsync(async (id: number) => ({ id }), { onSettled })
+        const safeFetch = appSafe.wrapAsync(async (id: number) => ({ id }), {
+          onSettled,
+        })
         await safeFetch(42)
 
         expect(onSettled).toHaveBeenCalledWith({ id: 42 }, null, [42])
@@ -904,13 +993,21 @@ describe('createSafe', () => {
         })
 
         appSafe.sync(
-          () => { throw new Error('fail') },
-          { onSettled: perCallOnSettled },
+          () => {
+            throw new Error('fail')
+          },
+          { onSettled: perCallOnSettled }
         )
 
         expect(callOrder).toEqual(['default', 'per-call'])
-        expect(defaultOnSettled).toHaveBeenCalledWith(null, { msg: 'Error: fail' })
-        expect(perCallOnSettled).toHaveBeenCalledWith(null, { msg: 'Error: fail' }, [])
+        expect(defaultOnSettled).toHaveBeenCalledWith(null, {
+          msg: 'Error: fail',
+        })
+        expect(perCallOnSettled).toHaveBeenCalledWith(
+          null,
+          { msg: 'Error: fail' },
+          []
+        )
       })
 
       it('calls both default and per-call onSettled on async success', async () => {
@@ -923,7 +1020,9 @@ describe('createSafe', () => {
           onSettled: defaultOnSettled,
         })
 
-        await appSafe.async(() => Promise.resolve('async'), { onSettled: perCallOnSettled })
+        await appSafe.async(() => Promise.resolve('async'), {
+          onSettled: perCallOnSettled,
+        })
 
         expect(defaultOnSettled).toHaveBeenCalledWith('async', null)
         expect(perCallOnSettled).toHaveBeenCalledWith('async', null, [])
@@ -939,7 +1038,9 @@ describe('createSafe', () => {
           onSettled: defaultOnSettled,
         })
 
-        await appSafe.async(() => Promise.reject('fail'), { onSettled: perCallOnSettled })
+        await appSafe.async(() => Promise.reject('fail'), {
+          onSettled: perCallOnSettled,
+        })
 
         expect(defaultOnSettled).toHaveBeenCalledWith(null, 'fail')
         expect(perCallOnSettled).toHaveBeenCalledWith(null, 'fail', [])
@@ -982,8 +1083,14 @@ describe('createSafe', () => {
         const safeDivide = appSafe.wrap(divide, { onSettled: perCallOnSettled })
         safeDivide(10, 0)
 
-        expect(defaultOnSettled).toHaveBeenCalledWith(null, { error: 'Error: Division by zero' })
-        expect(perCallOnSettled).toHaveBeenCalledWith(null, { error: 'Error: Division by zero' }, [10, 0])
+        expect(defaultOnSettled).toHaveBeenCalledWith(null, {
+          error: 'Error: Division by zero',
+        })
+        expect(perCallOnSettled).toHaveBeenCalledWith(
+          null,
+          { error: 'Error: Division by zero' },
+          [10, 0]
+        )
       })
 
       it('calls both onSettled hooks on wrapAsync success', async () => {
@@ -1020,12 +1127,19 @@ describe('createSafe', () => {
             if (id <= 0) throw new Error('Invalid')
             return { id }
           },
-          { onSettled: perCallOnSettled },
+          { onSettled: perCallOnSettled }
         )
         await safeFetch(-1)
 
-        expect(defaultOnSettled).toHaveBeenCalledWith(null, { code: 'ERR', msg: 'Error: Invalid' })
-        expect(perCallOnSettled).toHaveBeenCalledWith(null, { code: 'ERR', msg: 'Error: Invalid' }, [-1])
+        expect(defaultOnSettled).toHaveBeenCalledWith(null, {
+          code: 'ERR',
+          msg: 'Error: Invalid',
+        })
+        expect(perCallOnSettled).toHaveBeenCalledWith(
+          null,
+          { code: 'ERR', msg: 'Error: Invalid' },
+          [-1]
+        )
       })
     })
 
@@ -1057,7 +1171,9 @@ describe('createSafe', () => {
           onSettled: () => callOrder.push('onSettled'),
         })
 
-        appSafe.sync(() => { throw new Error('fail') })
+        appSafe.sync(() => {
+          throw new Error('fail')
+        })
 
         expect(callOrder).toEqual(['onError', 'onSettled'])
       })
@@ -1096,11 +1212,13 @@ describe('createSafe', () => {
         })
 
         appSafe.sync(
-          () => { throw new Error('fail') },
+          () => {
+            throw new Error('fail')
+          },
           {
             onError: () => callOrder.push('perCall-onError'),
             onSettled: () => callOrder.push('perCall-onSettled'),
-          },
+          }
         )
 
         expect(callOrder).toEqual([
@@ -1234,7 +1352,9 @@ describe('createSafe', () => {
         onSuccess: defaultOnSuccess,
       })
 
-      await appSafe.async(() => Promise.resolve('async'), { onSuccess: perCallOnSuccess })
+      await appSafe.async(() => Promise.resolve('async'), {
+        onSuccess: perCallOnSuccess,
+      })
 
       expect(defaultOnSuccess).toHaveBeenCalledWith('async')
       expect(perCallOnSuccess).toHaveBeenCalledWith('async', [])
@@ -1249,7 +1369,9 @@ describe('createSafe', () => {
         onError: defaultOnError,
       })
 
-      await appSafe.async(() => Promise.reject('fail'), { onError: perCallOnError })
+      await appSafe.async(() => Promise.reject('fail'), {
+        onError: perCallOnError,
+      })
 
       expect(defaultOnError).toHaveBeenCalledWith('fail')
       expect(perCallOnError).toHaveBeenCalledWith('fail', [])
@@ -1290,8 +1412,13 @@ describe('createSafe', () => {
       const safeDivide = appSafe.wrap(divide, { onError: perCallOnError })
       safeDivide(10, 0)
 
-      expect(defaultOnError).toHaveBeenCalledWith({ error: 'Error: Division by zero' })
-      expect(perCallOnError).toHaveBeenCalledWith({ error: 'Error: Division by zero' }, [10, 0])
+      expect(defaultOnError).toHaveBeenCalledWith({
+        error: 'Error: Division by zero',
+      })
+      expect(perCallOnError).toHaveBeenCalledWith(
+        { error: 'Error: Division by zero' },
+        [10, 0]
+      )
     })
 
     it('calls both hooks on wrapAsync success with context', async () => {
@@ -1330,8 +1457,14 @@ describe('createSafe', () => {
       )
       await safeFetch(-1)
 
-      expect(defaultOnError).toHaveBeenCalledWith({ code: 'ERR', msg: 'Error: Invalid' })
-      expect(perCallOnError).toHaveBeenCalledWith({ code: 'ERR', msg: 'Error: Invalid' }, [-1])
+      expect(defaultOnError).toHaveBeenCalledWith({
+        code: 'ERR',
+        msg: 'Error: Invalid',
+      })
+      expect(perCallOnError).toHaveBeenCalledWith(
+        { code: 'ERR', msg: 'Error: Invalid' },
+        [-1]
+      )
     })
 
     it('works when only default hooks are provided', () => {
@@ -1358,7 +1491,10 @@ describe('createSafe', () => {
         parseError: (e) => String(e),
       })
 
-      appSafe.sync(() => 42, { onSuccess: perCallOnSuccess, onError: perCallOnError })
+      appSafe.sync(() => 42, {
+        onSuccess: perCallOnSuccess,
+        onError: perCallOnError,
+      })
 
       expect(perCallOnSuccess).toHaveBeenCalledWith(42, [])
       expect(perCallOnError).not.toHaveBeenCalled()
@@ -1443,8 +1579,12 @@ describe('createSafe', () => {
 
       loggingSafe.sync(() => 42)
       silentSafe.sync(() => 42)
-      loggingSafe.sync(() => { throw new Error('fail') })
-      silentSafe.sync(() => { throw new Error('fail') })
+      loggingSafe.sync(() => {
+        throw new Error('fail')
+      })
+      silentSafe.sync(() => {
+        throw new Error('fail')
+      })
 
       expect(log1).toEqual(['success', 'error'])
       expect(log2).toEqual([])
@@ -1471,11 +1611,15 @@ describe('createSafe', () => {
     it('createSafe with defaultError returns it when parseError throws', () => {
       const defaultErr = { code: 'DEFAULT' as const, message: 'fallback' }
       const appSafe = createSafe({
-        parseError: () => { throw new Error('parseError broke') },
+        parseError: () => {
+          throw new Error('parseError broke')
+        },
         defaultError: defaultErr,
       })
 
-      const result = appSafe.sync(() => { throw new Error('original') })
+      const result = appSafe.sync(() => {
+        throw new Error('original')
+      })
       expect(result[0]).toBeNull()
       expect(result[1]).toBe(defaultErr)
     })
@@ -1485,13 +1629,17 @@ describe('createSafe', () => {
       const perCallDefault = { code: 'PER_CALL' as const }
 
       const appSafe = createSafe({
-        parseError: () => { throw new Error('parseError broke') },
+        parseError: () => {
+          throw new Error('parseError broke')
+        },
         defaultError: factoryDefault,
       })
 
       const result = appSafe.sync(
-        () => { throw new Error('original') },
-        { defaultError: perCallDefault as any },
+        () => {
+          throw new Error('original')
+        },
+        { defaultError: perCallDefault as any }
       )
       expect(result[0]).toBeNull()
       expect(result[1]).toBe(perCallDefault)
@@ -1502,13 +1650,20 @@ describe('createSafe', () => {
       const parseErrorException = new Error('parseError broke')
 
       const appSafe = createSafe({
-        parseError: () => { throw parseErrorException },
+        parseError: () => {
+          throw parseErrorException
+        },
         defaultError: 'fallback',
         onHookError,
       })
 
-      appSafe.sync(() => { throw new Error('original') })
-      expect(onHookError).toHaveBeenCalledWith(parseErrorException, 'parseError')
+      appSafe.sync(() => {
+        throw new Error('original')
+      })
+      expect(onHookError).toHaveBeenCalledWith(
+        parseErrorException,
+        'parseError'
+      )
     })
 
     it('handles default onSuccess that throws (swallowed, success result returned)', () => {
@@ -1571,8 +1726,10 @@ describe('createSafe', () => {
       })
 
       const result = appSafe.sync(
-        () => { throw new Error('fail') },
-        { onError: perCallOnError },
+        () => {
+          throw new Error('fail')
+        },
+        { onError: perCallOnError }
       )
 
       expect(perCallOnError).toHaveBeenCalledWith('Error: fail', [])
@@ -1623,10 +1780,9 @@ describe('createSafe', () => {
         },
       })
 
-      const result = await appSafe.async(
-        () => Promise.resolve('done'),
-        { onSuccess: perCallOnSuccess },
-      )
+      const result = await appSafe.async(() => Promise.resolve('done'), {
+        onSuccess: perCallOnSuccess,
+      })
 
       expect(perCallOnSuccess).toHaveBeenCalledWith('done', [])
       expect(result).toEqual(['done', null])
@@ -1676,7 +1832,8 @@ describe('createSafe', () => {
         }),
       })
 
-      const result: SafeResult<number, { code: string; message: string }> = appSafe.sync(() => 42)
+      const result: SafeResult<number, { code: string; message: string }> =
+        appSafe.sync(() => 42)
 
       expect(result).toEqual([42, null])
     })
@@ -1686,8 +1843,8 @@ describe('createSafe', () => {
         parseError: (e) => ({ error: String(e) }),
       })
 
-      const result: SafeResult<string, { error: string }> = await appSafe.async(() =>
-        Promise.resolve('hello')
+      const result: SafeResult<string, { error: string }> = await appSafe.async(
+        () => Promise.resolve('hello')
       )
 
       expect(result).toEqual(['hello', null])
@@ -1698,9 +1855,8 @@ describe('createSafe', () => {
         parseError: (e) => String(e),
       })
 
-      const wrapped: (a: number, b: number) => SafeResult<number, string> = appSafe.wrap(
-        (a: number, b: number) => a + b
-      )
+      const wrapped: (a: number, b: number) => SafeResult<number, string> =
+        appSafe.wrap((a: number, b: number) => a + b)
 
       expect(wrapped(1, 2)).toEqual([3, null])
     })
@@ -1710,7 +1866,9 @@ describe('createSafe', () => {
         parseError: (e) => ({ err: String(e) }),
       })
 
-      const wrapped: (id: number) => Promise<SafeResult<{ id: number }, { err: string }>> =
+      const wrapped: (
+        id: number
+      ) => Promise<SafeResult<{ id: number }, { err: string }>> =
         appSafe.wrapAsync(async (id: number) => ({ id }))
 
       expect(await wrapped(42)).toEqual([{ id: 42 }, null])
@@ -1881,7 +2039,7 @@ describe('createSafe', () => {
       })
 
       it('per-call onRetry receives context', async () => {
-        const fn = vi.fn().mockRejectedValue(new Error('fail'))
+        const _fn = vi.fn().mockRejectedValue(new Error('fail'))
         const perCallOnRetry = vi.fn()
 
         const appSafe = createSafe({
@@ -1890,7 +2048,7 @@ describe('createSafe', () => {
         })
 
         const wrapped = appSafe.wrapAsync(
-          async (id: number, name: string) => {
+          async (_id: number, _name: string) => {
             throw new Error('fail')
           },
           {
@@ -1900,7 +2058,10 @@ describe('createSafe', () => {
 
         await wrapped(42, 'test')
 
-        expect(perCallOnRetry).toHaveBeenCalledWith('Error: fail', 1, [42, 'test'])
+        expect(perCallOnRetry).toHaveBeenCalledWith('Error: fail', 1, [
+          42,
+          'test',
+        ])
       })
     })
 
@@ -2051,9 +2212,12 @@ describe('createSafe', () => {
       it('uses default abortAfter config from factory', async () => {
         vi.useFakeTimers()
 
-        const fn = vi.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(() => resolve('done'), 1000))
-        )
+        const fn = vi
+          .fn()
+          .mockImplementation(
+            () =>
+              new Promise((resolve) => setTimeout(() => resolve('done'), 1000))
+          )
 
         const appSafe = createSafe({
           parseError: (e) => ({
@@ -2127,12 +2291,15 @@ describe('createSafe', () => {
       it('per-call abortAfter overrides default abortAfter', async () => {
         vi.useFakeTimers()
 
-        const fn = vi.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(() => resolve('done'), 75))
-        )
+        const fn = vi
+          .fn()
+          .mockImplementation(
+            () =>
+              new Promise((resolve) => setTimeout(() => resolve('done'), 75))
+          )
 
         const appSafe = createSafe({
-          parseError: (e) => e instanceof TimeoutError ? 'timeout' : 'error',
+          parseError: (e) => (e instanceof TimeoutError ? 'timeout' : 'error'),
           abortAfter: 50, // Default would timeout
         })
 
@@ -2149,12 +2316,15 @@ describe('createSafe', () => {
       it('per-call abortAfter can set shorter timeout than default', async () => {
         vi.useFakeTimers()
 
-        const fn = vi.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(() => resolve('done'), 100))
-        )
+        const fn = vi
+          .fn()
+          .mockImplementation(
+            () =>
+              new Promise((resolve) => setTimeout(() => resolve('done'), 100))
+          )
 
         const appSafe = createSafe({
-          parseError: (e) => e instanceof TimeoutError ? 'timeout' : 'error',
+          parseError: (e) => (e instanceof TimeoutError ? 'timeout' : 'error'),
           abortAfter: 200, // Default would succeed
         })
 
@@ -2177,7 +2347,7 @@ describe('createSafe', () => {
           )
 
         const appSafe = createSafe({
-          parseError: (e) => e instanceof TimeoutError ? 'timeout' : 'error',
+          parseError: (e) => (e instanceof TimeoutError ? 'timeout' : 'error'),
           abortAfter: 50, // Default would timeout
         })
 
@@ -2200,7 +2370,9 @@ describe('createSafe', () => {
         const fn = vi.fn().mockImplementation(() => {
           attempts++
           const delay = attempts < 3 ? 200 : 10
-          return new Promise((resolve) => setTimeout(() => resolve('success'), delay))
+          return new Promise((resolve) =>
+            setTimeout(() => resolve('success'), delay)
+          )
         })
 
         const appSafe = createSafe({
@@ -2226,9 +2398,12 @@ describe('createSafe', () => {
       it('onRetry is called with TimeoutError when timeout causes retry', async () => {
         vi.useFakeTimers()
 
-        const fn = vi.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(() => resolve('done'), 200))
-        )
+        const fn = vi
+          .fn()
+          .mockImplementation(
+            () =>
+              new Promise((resolve) => setTimeout(() => resolve('done'), 200))
+          )
 
         const onRetry = vi.fn()
 
@@ -2274,12 +2449,15 @@ describe('createSafe', () => {
       it('per-call abortAfter works without default', async () => {
         vi.useFakeTimers()
 
-        const fn = vi.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(() => resolve('done'), 200))
-        )
+        const fn = vi
+          .fn()
+          .mockImplementation(
+            () =>
+              new Promise((resolve) => setTimeout(() => resolve('done'), 200))
+          )
 
         const appSafe = createSafe({
-          parseError: (e) => e instanceof TimeoutError ? 'timeout' : 'error',
+          parseError: (e) => (e instanceof TimeoutError ? 'timeout' : 'error'),
         })
 
         const promise = appSafe.async(fn, { abortAfter: 100 })
@@ -2313,7 +2491,9 @@ describe('createSafe', () => {
           parseResult: (response) => ({ wrapped: response }),
         })
 
-        const [result, error] = await appSafe.async(() => Promise.resolve('hello'))
+        const [result, error] = await appSafe.async(() =>
+          Promise.resolve('hello')
+        )
 
         expect(error).toBeNull()
         expect(result).toEqual({ wrapped: 'hello' })
@@ -2478,7 +2658,10 @@ describe('createSafe', () => {
         const [result, error] = appSafe.sync(() => 42)
 
         expect(result).toBeNull()
-        expect(error).toEqual({ code: 'PARSE_ERROR', message: 'validation failed' })
+        expect(error).toEqual({
+          code: 'PARSE_ERROR',
+          message: 'validation failed',
+        })
       })
 
       it('per-call parseResult throw returns error through error path', () => {
@@ -2496,7 +2679,10 @@ describe('createSafe', () => {
         })
 
         expect(result).toBeNull()
-        expect(error).toEqual({ code: 'PARSE_ERROR', message: 'per-call validation failed' })
+        expect(error).toEqual({
+          code: 'PARSE_ERROR',
+          message: 'per-call validation failed',
+        })
       })
 
       it('factory parseResult throw triggers retry on async', async () => {
@@ -2504,7 +2690,9 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
-          parseResult: () => { throw new Error('not ready') },
+          parseResult: () => {
+            throw new Error('not ready')
+          },
           retry: { times: 3 },
         })
 
@@ -2524,7 +2712,9 @@ describe('createSafe', () => {
           parseResult,
         })
 
-        appSafe.sync(() => { throw new Error('fail') })
+        appSafe.sync(() => {
+          throw new Error('fail')
+        })
 
         expect(parseResult).not.toHaveBeenCalled()
       })
@@ -2612,7 +2802,9 @@ describe('createSafe', () => {
           parseError: (e) => String(e),
         })
 
-        const [result, error] = await appSafe.async(() => Promise.resolve('hello'))
+        const [result, error] = await appSafe.async(() =>
+          Promise.resolve('hello')
+        )
 
         expect(result).toBe('hello')
         expect(error).toBeNull()
@@ -2788,7 +2980,9 @@ describe('createSafe', () => {
           code: 'PARSE_RESULT_ERROR' as const,
           message: e instanceof Error ? e.message : 'unknown',
         }),
-        parseResult: () => { throw new Error('parseResult exploded') },
+        parseResult: () => {
+          throw new Error('parseResult exploded')
+        },
       })
 
       const [data, error] = await appSafe.all({
@@ -2797,7 +2991,10 @@ describe('createSafe', () => {
       })
 
       expect(data).toBeNull()
-      expect(error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
+      expect(error).toEqual({
+        code: 'PARSE_RESULT_ERROR',
+        message: 'parseResult exploded',
+      })
     })
 
     it('handles a function that throws synchronously (before returning a promise)', async () => {
@@ -2810,7 +3007,9 @@ describe('createSafe', () => {
 
       const [data, error] = await appSafe.all({
         good: () => Promise.resolve(1),
-        bad: () => { throw new Error('sync kaboom') },
+        bad: () => {
+          throw new Error('sync kaboom')
+        },
       })
 
       expect(data).toBeNull()
@@ -2835,7 +3034,10 @@ describe('createSafe', () => {
       })
 
       expect(data).toBeNull()
-      expect(error).toEqual({ code: 'ERR', message: expect.stringMatching(/abortAfter/) })
+      expect(error).toEqual({
+        code: 'ERR',
+        message: expect.stringMatching(/abortAfter/),
+      })
     })
 
     it('ignores late rejections after already resolved (rejection handler done guard)', async () => {
@@ -2855,7 +3057,10 @@ describe('createSafe', () => {
       })
 
       expect(data).toBeNull()
-      expect(error).toEqual({ code: 'ERR', message: expect.stringMatching(/abortAfter/) })
+      expect(error).toEqual({
+        code: 'ERR',
+        message: expect.stringMatching(/abortAfter/),
+      })
     })
   })
 
@@ -2955,7 +3160,9 @@ describe('createSafe', () => {
           code: 'PARSE_RESULT_ERROR' as const,
           message: e instanceof Error ? e.message : 'unknown',
         }),
-        parseResult: () => { throw new Error('parseResult exploded') },
+        parseResult: () => {
+          throw new Error('parseResult exploded')
+        },
       })
 
       const results = await appSafe.allSettled({
@@ -2964,9 +3171,15 @@ describe('createSafe', () => {
       })
 
       expect(results.a.ok).toBe(false)
-      expect(results.a.error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
+      expect(results.a.error).toEqual({
+        code: 'PARSE_RESULT_ERROR',
+        message: 'parseResult exploded',
+      })
       expect(results.b.ok).toBe(false)
-      expect(results.b.error).toEqual({ code: 'PARSE_RESULT_ERROR', message: 'parseResult exploded' })
+      expect(results.b.error).toEqual({
+        code: 'PARSE_RESULT_ERROR',
+        message: 'parseResult exploded',
+      })
     })
   })
 
@@ -2978,7 +3191,9 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
           onHookError,
         })
 
@@ -2994,11 +3209,15 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
-          onError: () => { throw hookError },
+          onError: () => {
+            throw hookError
+          },
           onHookError,
         })
 
-        const result = appSafe.sync(() => { throw new Error('fail') })
+        const result = appSafe.sync(() => {
+          throw new Error('fail')
+        })
 
         expect(result[0]).toBeNull()
         expect(onHookError).toHaveBeenCalledWith(hookError, 'onError')
@@ -3010,7 +3229,9 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
-          onSettled: () => { throw hookError },
+          onSettled: () => {
+            throw hookError
+          },
           onHookError,
         })
 
@@ -3027,7 +3248,9 @@ describe('createSafe', () => {
         const appSafe = createSafe({
           parseError: (e) => String(e),
           retry: { times: 1 },
-          onRetry: () => { throw hookError },
+          onRetry: () => {
+            throw hookError
+          },
           onHookError,
         })
 
@@ -3046,7 +3269,9 @@ describe('createSafe', () => {
         })
 
         const result = appSafe.sync(() => 42, {
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
         })
 
         expect(result).toEqual([42, null])
@@ -3059,7 +3284,9 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
           onHookError,
         })
 
@@ -3076,7 +3303,9 @@ describe('createSafe', () => {
 
         const appSafe = createSafe({
           parseError: (e) => String(e),
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
           onHookError,
         })
 
@@ -3100,7 +3329,9 @@ describe('createSafe', () => {
         })
 
         appSafe.sync(() => 42, {
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
           onHookError: perCallOnHookError,
         })
 
@@ -3119,7 +3350,9 @@ describe('createSafe', () => {
         })
 
         await appSafe.async(() => Promise.resolve(42), {
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
           onHookError: perCallOnHookError,
         })
 
@@ -3138,7 +3371,9 @@ describe('createSafe', () => {
         })
 
         const wrapped = appSafe.wrap((x: number) => x * 2, {
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
           onHookError: perCallOnHookError,
         })
         wrapped(5)
@@ -3158,7 +3393,9 @@ describe('createSafe', () => {
         })
 
         const wrapped = appSafe.wrapAsync(async (x: number) => x * 2, {
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
           onHookError: perCallOnHookError,
         })
         await wrapped(5)
@@ -3177,7 +3414,9 @@ describe('createSafe', () => {
         })
 
         appSafe.sync(() => 42, {
-          onSuccess: () => { throw hookError },
+          onSuccess: () => {
+            throw hookError
+          },
         })
 
         expect(factoryOnHookError).toHaveBeenCalledWith(hookError, 'onSuccess')
@@ -3187,11 +3426,15 @@ describe('createSafe', () => {
     describe('falsy defaultError values', () => {
       it('defaultError: empty string is returned when parseError throws', () => {
         const appSafe = createSafe({
-          parseError: () => { throw new Error('parseError broke') },
+          parseError: () => {
+            throw new Error('parseError broke')
+          },
           defaultError: '',
         })
 
-        const result = appSafe.sync(() => { throw new Error('original') })
+        const result = appSafe.sync(() => {
+          throw new Error('original')
+        })
         expect(result[0]).toBeNull()
         expect(result[1]).toBe('')
         expect(result.ok).toBe(false)
@@ -3199,11 +3442,15 @@ describe('createSafe', () => {
 
       it('defaultError: 0 is returned when parseError throws', () => {
         const appSafe = createSafe({
-          parseError: () => { throw new Error('parseError broke') },
+          parseError: () => {
+            throw new Error('parseError broke')
+          },
           defaultError: 0,
         })
 
-        const result = appSafe.sync(() => { throw new Error('original') })
+        const result = appSafe.sync(() => {
+          throw new Error('original')
+        })
         expect(result[0]).toBeNull()
         expect(result[1]).toBe(0)
         expect(result.ok).toBe(false)
@@ -3211,11 +3458,15 @@ describe('createSafe', () => {
 
       it('defaultError: false is returned when parseError throws', () => {
         const appSafe = createSafe({
-          parseError: () => { throw new Error('parseError broke') },
+          parseError: () => {
+            throw new Error('parseError broke')
+          },
           defaultError: false,
         })
 
-        const result = appSafe.sync(() => { throw new Error('original') })
+        const result = appSafe.sync(() => {
+          throw new Error('original')
+        })
         expect(result[0]).toBeNull()
         expect(result[1]).toBe(false)
         expect(result.ok).toBe(false)
@@ -3223,11 +3474,15 @@ describe('createSafe', () => {
 
       it('defaultError: null is returned when parseError throws', () => {
         const appSafe = createSafe({
-          parseError: () => { throw new Error('parseError broke') },
+          parseError: () => {
+            throw new Error('parseError broke')
+          },
           defaultError: null,
         })
 
-        const result = appSafe.sync(() => { throw new Error('original') })
+        const result = appSafe.sync(() => {
+          throw new Error('original')
+        })
         expect(result[0]).toBeNull()
         // defaultError is null but `defaultError ?? toError(e)` falls through to toError
         // because null is nullish — so the fallback Error is returned
@@ -3240,8 +3495,12 @@ describe('createSafe', () => {
       it('factory onHookError that throws is silently swallowed', () => {
         const appSafe = createSafe({
           parseError: (e) => String(e),
-          onSuccess: () => { throw new Error('hook broke') },
-          onHookError: () => { throw new Error('onHookError broke') },
+          onSuccess: () => {
+            throw new Error('hook broke')
+          },
+          onHookError: () => {
+            throw new Error('onHookError broke')
+          },
         })
 
         const result = appSafe.sync(() => 42)
@@ -3255,8 +3514,12 @@ describe('createSafe', () => {
         })
 
         const result = appSafe.sync(() => 42, {
-          onSuccess: () => { throw new Error('hook broke') },
-          onHookError: () => { throw new Error('onHookError broke') },
+          onSuccess: () => {
+            throw new Error('hook broke')
+          },
+          onHookError: () => {
+            throw new Error('onHookError broke')
+          },
         })
 
         expect(result).toEqual([42, null])
