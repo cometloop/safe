@@ -137,7 +137,7 @@ All methods support optional `parseError` for custom error types, `parseResult` 
 
 ## Documentation
 
-Full API reference, examples, and guides:
+Find full API reference, examples, and guides:
 
 **[https://cometloop.github.io/safe/](https://cometloop.github.io/safe/)**
 
