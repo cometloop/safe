@@ -1,15 +1,18 @@
 {
   "name": "@cometloop/safe",
   "version": "0.0.1",
-  "description": "Zero-dependency, type-safe error handling using a result tuple pattern for TypeScript",
+  "description": "Zero-dependency, type-safe error handling using a result pattern for TypeScript",
   "author": "cometloop",
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/cometloop/safe.git",
     "directory": "packages/safe"
   },
-  "homepage": "https://github.com/cometloop/safe#readme",
+  "homepage": "https://cometloop.github.io/safe/",
   "bugs": {
     "url": "https://github.com/cometloop/safe/issues"
   },
@@ -20,7 +23,14 @@
     "safe",
     "tuple",
     "try-catch",
-    "type-safe"
+    "type-safe",
+    "go-style",
+    "golang",
+    "async",
+    "promise",
+    "wrapper",
+    "error",
+    "no-throw"
   ],
   "engines": {
     "node": ">=14"
