@@ -1,5 +1,5 @@
 {
-  "name": "tailwind-plus-syntax",
+  "name": "@cometloop/safe-docs",
   "version": "0.1.0",
   "private": true,
   "scripts": {
