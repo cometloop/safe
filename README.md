@@ -2,6 +2,8 @@
 
 Type-safe error handling library for TypeScript using the Result pattern. Zero dependencies.
 
+[![Coverage](https://codecov.io/gh/cometloop/safe/branch/main/graph/badge.svg)](https://codecov.io/gh/cometloop/safe)
+
 ## **Wrap any function**
 
 - Flexible wrapping — single function, domain scope, or app-wide
