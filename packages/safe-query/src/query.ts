@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { QueryConfig, QueryState, QueryCallable, SearchParams } from './types'
+import type { QueryConfig, QueryState, QueryCallable } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
