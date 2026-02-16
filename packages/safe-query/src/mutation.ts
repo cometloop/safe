@@ -64,12 +64,14 @@ export function createMutation<
     if (entityKeys.length !== 1) return null
 
     const entityType = entityKeys[0]
+    if (!entityType) return null
 
     // Get entity ID from last path param
     if (!params) return null
     const paramValues = Object.values(params)
     if (paramValues.length === 0) return null
     const entityId = paramValues[paramValues.length - 1]
+    if (!entityId) return null
 
     return { entityType, entityId }
   }
@@ -82,14 +84,15 @@ export function createMutation<
     const invokeOnSettled = options?.onSettled
     const opt = resolveOptimistic(params)
 
-    // Optimistic update flow
-    let snapshot: ReturnType<typeof entityStore.snapshot> | null = null
+    // Optimistic update flow using per-entity tracking
     let affectedQueryKeys: Set<string> | null = null
+    let didOptimistic = false
 
     if (opt && (method === 'PUT' || method === 'PATCH') && body !== undefined) {
-      snapshot = entityStore.snapshot()
       const existing = entityStore.get(opt.entityType, opt.entityId)
       if (existing) {
+        entityStore.beginOptimistic(opt.entityType, opt.entityId)
+        didOptimistic = true
         const merged = { ...(existing as Record<string, unknown>), ...(body as Record<string, unknown>) }
         entityStore.set(opt.entityType, opt.entityId, merged)
         affectedQueryKeys = entityStore.getQueriesForEntity(
@@ -99,7 +102,8 @@ export function createMutation<
         notifier.notifyMany(affectedQueryKeys)
       }
     } else if (opt && method === 'DELETE') {
-      snapshot = entityStore.snapshot()
+      entityStore.beginOptimistic(opt.entityType, opt.entityId)
+      didOptimistic = true
       affectedQueryKeys = entityStore.getQueriesForEntity(
         opt.entityType,
         opt.entityId
@@ -120,6 +124,11 @@ export function createMutation<
           | undefined,
         retry,
         onSuccess: (result) => {
+          // End optimistic tracking as success
+          if (didOptimistic && opt) {
+            entityStore.endOptimistic(opt.entityType, opt.entityId, true)
+          }
+
           if (entities && result !== undefined) {
             const { entityKeys } = entityStore.normalize(
               result,
@@ -147,14 +156,16 @@ export function createMutation<
           invokeOnSuccess?.(result)
         },
         onError: (error) => {
-          // Rollback optimistic update
-          if (snapshot) {
-            entityStore.restore(snapshot)
-            if (affectedQueryKeys) {
-              // Invalidate affected queries to refetch server truth
-              for (const qk of affectedQueryKeys) {
+          // Rollback optimistic update using per-entity tracking
+          if (didOptimistic && opt) {
+            const keysToInvalidate = entityStore.endOptimistic(opt.entityType, opt.entityId, false)
+            if (keysToInvalidate) {
+              for (const qk of keysToInvalidate) {
                 queryCache.invalidate(qk)
               }
+              notifier.notifyMany(keysToInvalidate)
+            } else if (affectedQueryKeys) {
+              // Counter still > 0, notify affected queries to reflect current state
               notifier.notifyMany(affectedQueryKeys)
             }
           }

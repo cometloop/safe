@@ -513,4 +513,105 @@ describe('createMutation', () => {
       __type: 'user',
     })
   })
+
+  it('concurrent mutations: both succeed without conflict', async () => {
+    let resolve1: (v: any) => void
+    let resolve2: (v: any) => void
+    const promise1 = new Promise((r) => { resolve1 = r })
+    const promise2 = new Promise((r) => { resolve2 = r })
+
+    let callCount = 0
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return callCount === 1 ? promise1 : promise2
+    })
+
+    const deps = createDeps({ enableOptimisticUpdates: true })
+
+    deps.entityStore.set('user', '1', {
+      id: '1',
+      name: 'Alice',
+      email: 'alice@test.com',
+      __type: 'user',
+    })
+
+    deps.entityStore.registerQueryEntities(
+      '/users',
+      new Set(['user:1'])
+    )
+
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
+      method: 'PUT',
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    // Launch two concurrent mutations
+    const p1 = mutation({ params: { id: '1' }, body: { name: 'Bob' } })
+    const p2 = mutation({ params: { id: '1' }, body: { email: 'bob@test.com' } })
+
+    // Both succeed
+    resolve1!({ id: '1', name: 'Bob', email: 'alice@test.com', __type: 'user' })
+    resolve2!({ id: '1', name: 'Bob', email: 'bob@test.com', __type: 'user' })
+
+    await p1
+    await p2
+
+    // Final state should reflect both mutations
+    const entity = deps.entityStore.get('user', '1') as any
+    expect(entity.name).toBe('Bob')
+    expect(entity.email).toBe('bob@test.com')
+  })
+
+  it('concurrent mutations: second fails, rolls back to base when all settle', async () => {
+    let resolve1: (v: any) => void
+    let reject2: (e: any) => void
+    const promise1 = new Promise((r) => { resolve1 = r })
+    const promise2 = new Promise((_, rej) => { reject2 = rej })
+
+    let callCount = 0
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return callCount === 1 ? promise1 : promise2
+    })
+
+    const deps = createDeps({ enableOptimisticUpdates: true })
+
+    deps.entityStore.set('user', '1', {
+      id: '1',
+      name: 'Alice',
+      __type: 'user',
+    })
+
+    deps.entityStore.registerQueryEntities(
+      '/users',
+      new Set(['user:1'])
+    )
+
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
+      method: 'PUT',
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    const p1 = mutation({ params: { id: '1' }, body: { name: 'Bob' } })
+    const p2 = mutation({ params: { id: '1' }, body: { name: 'Charlie' } })
+
+    // First succeeds
+    resolve1!({ id: '1', name: 'Bob', __type: 'user' })
+    await p1
+
+    // Second fails
+    reject2!(new Error('Server error'))
+    await p2
+
+    // Should roll back to base value (Alice) because one mutation errored
+    expect(deps.entityStore.get('user', '1')).toEqual({
+      id: '1',
+      name: 'Alice',
+      __type: 'user',
+    })
+  })
 })

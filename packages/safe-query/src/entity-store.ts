@@ -6,6 +6,11 @@ export class EntityStore {
   private entities = new Map<string, Map<string, unknown>>()
   private entityToQueries = new Map<string, Set<string>>()
   private queryToEntities = new Map<string, Set<string>>()
+  private optimisticState = new Map<string, {
+    baseValue: unknown | undefined
+    inFlightCount: number
+    hadError: boolean
+  }>()
 
   private entityKey(type: string, id: string): string {
     return `${type}:${id}`
@@ -96,9 +101,10 @@ export class EntityStore {
 
       const obj = value as Record<string, unknown>
       const typeName = obj.__type as string | undefined
+      const extractor = typeName ? extractors[typeName] : undefined
 
-      if (typeName && extractors[typeName]) {
-        const id = extractors[typeName](obj)
+      if (typeName && extractor) {
+        const id = extractor(obj)
         const eKey = this.entityKey(typeName, id)
         entityKeys.add(eKey)
 
@@ -189,9 +195,61 @@ export class EntityStore {
     }
   }
 
+  beginOptimistic(type: string, id: string): void {
+    const key = this.entityKey(type, id)
+    const existing = this.optimisticState.get(key)
+    if (existing) {
+      existing.inFlightCount++
+    } else {
+      this.optimisticState.set(key, {
+        baseValue: this.get(type, id),
+        inFlightCount: 1,
+        hadError: false,
+      })
+    }
+  }
+
+  endOptimistic(type: string, id: string, success: boolean): Set<string> | null {
+    const key = this.entityKey(type, id)
+    const state = this.optimisticState.get(key)
+    if (!state) return null
+
+    if (!success) {
+      state.hadError = true
+    }
+
+    state.inFlightCount--
+
+    if (state.inFlightCount > 0) {
+      return null
+    }
+
+    // All in-flight mutations for this entity have settled
+    if (state.hadError) {
+      // Restore to base value
+      if (state.baseValue === undefined) {
+        this.delete(type, id)
+      } else {
+        this.set(type, id, state.baseValue)
+      }
+      this.optimisticState.delete(key)
+      // Return affected query keys for invalidation
+      return this.getQueriesForEntity(type, id)
+    }
+
+    // All succeeded, discard tracking
+    this.optimisticState.delete(key)
+    return null
+  }
+
+  clearOptimistic(): void {
+    this.optimisticState.clear()
+  }
+
   clear(): void {
     this.entities.clear()
     this.entityToQueries.clear()
     this.queryToEntities.clear()
+    this.clearOptimistic()
   }
 }

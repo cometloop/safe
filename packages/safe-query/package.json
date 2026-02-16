@@ -64,6 +64,7 @@
   "devDependencies": {
     "@core/eslint-config": "workspace:*",
     "@core/typescript-config": "workspace:*",
+    "@types/node": "^24.1.0",
     "@vitest/coverage-v8": "^4.0.16",
     "@vitest/ui": "^4.0.16",
     "eslint": "^8.57.0",

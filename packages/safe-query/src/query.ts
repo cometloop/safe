@@ -37,6 +37,19 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
   const configOnError = config.onError
   const configOnSettled = config.onSettled
 
+  const hasParams = path.includes(':')
+  let warnedDefaultKey = false
+
+  function warnIfParameterized(): void {
+    if (hasParams && !warnedDefaultKey) {
+      warnedDefaultKey = true
+      console.warn(
+        `[safe-query] Accessing getter on parameterized query "${path}" returns state for the parameterless default key. ` +
+        `Use .subscribe({ params }) or invoke with params to access parameterized state.`
+      )
+    }
+  }
+
   function getState(key: string): QueryState<TParsed, E> {
     const entry = queryCache.get(key)
     if (!entry) {
@@ -113,10 +126,24 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
 
     const generation = ++entry.generation
 
+    // Create AbortController for this request
+    const controller = new AbortController()
+    entry.abortController = controller
+
+    // Link user-provided signal
+    const userSignal = options?.signal
+    if (userSignal) {
+      if (userSignal.aborted) {
+        controller.abort(userSignal.reason)
+      } else {
+        userSignal.addEventListener('abort', () => controller.abort(userSignal.reason), { once: true })
+      }
+    }
+
     const promise = safeInstance.async<TData, TParsed>(
-      (signal) => {
-        const context = { ...options }
-        if (signal) context.signal = options?.signal ?? signal
+      () => {
+        const context: Record<string, unknown> = { ...options }
+        context.signal = controller.signal
         return fn(context as QueryFnContext<TPath>)
       },
       {
@@ -152,6 +179,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
         onSettled: () => {
           if (entry.generation !== generation) return
           entry.inflightPromise = null
+          entry.abortController = null
           notifier.notify(key)
 
           const state = getState(key)
@@ -214,23 +242,23 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
   // Attach reactive getters using default key (base path, no params)
   const defaultKey = queryCache.buildKey(path)
   Object.defineProperty(callable, 'status', {
-    get() { return getState(defaultKey).status },
+    get() { warnIfParameterized(); return getState(defaultKey).status },
     enumerable: true,
   })
   Object.defineProperty(callable, 'data', {
-    get() { return getState(defaultKey).data },
+    get() { warnIfParameterized(); return getState(defaultKey).data },
     enumerable: true,
   })
   Object.defineProperty(callable, 'error', {
-    get() { return getState(defaultKey).error },
+    get() { warnIfParameterized(); return getState(defaultKey).error },
     enumerable: true,
   })
   Object.defineProperty(callable, 'isFetching', {
-    get() { return getState(defaultKey).isFetching },
+    get() { warnIfParameterized(); return getState(defaultKey).isFetching },
     enumerable: true,
   })
   Object.defineProperty(callable, 'isStale', {
-    get() { return getState(defaultKey).isStale },
+    get() { warnIfParameterized(); return getState(defaultKey).isStale },
     enumerable: true,
   })
 

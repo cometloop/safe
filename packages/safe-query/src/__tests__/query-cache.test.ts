@@ -351,6 +351,167 @@ describe('QueryCache', () => {
     })
   })
 
+  describe('cancelInflight', () => {
+    it('aborts the abort controller', () => {
+      const cache = new QueryCache()
+      const entry = cache.getOrCreate('/users')
+      const controller = new AbortController()
+      entry.abortController = controller
+
+      cache.cancelInflight('/users')
+
+      expect(controller.signal.aborted).toBe(true)
+      expect(entry.abortController).toBeNull()
+    })
+
+    it('increments generation to discard pending callbacks', () => {
+      const cache = new QueryCache()
+      const entry = cache.getOrCreate('/users')
+      const initialGen = entry.generation
+
+      cache.cancelInflight('/users')
+
+      expect(entry.generation).toBe(initialGen + 1)
+    })
+
+    it('clears inflight promise', () => {
+      const cache = new QueryCache()
+      const entry = cache.getOrCreate('/users')
+      entry.inflightPromise = Promise.resolve([null, null]) as any
+
+      cache.cancelInflight('/users')
+
+      expect(entry.inflightPromise).toBeNull()
+    })
+
+    it('is a no-op for missing key', () => {
+      const cache = new QueryCache()
+      expect(() => cache.cancelInflight('/missing')).not.toThrow()
+    })
+
+    it('handles entry with no abort controller', () => {
+      const cache = new QueryCache()
+      cache.getOrCreate('/users')
+
+      expect(() => cache.cancelInflight('/users')).not.toThrow()
+    })
+  })
+
+  describe('invalidate with cancelInflight', () => {
+    it('aborts inflight request on invalidate', () => {
+      const cache = new QueryCache()
+      const entry = cache.getOrCreate('/users')
+      const controller = new AbortController()
+      entry.abortController = controller
+      entry.inflightPromise = Promise.resolve([null, null]) as any
+      cache.setData('/users', [], [], new Set())
+
+      cache.invalidate('/users')
+
+      expect(controller.signal.aborted).toBe(true)
+      expect(entry.inflightPromise).toBeNull()
+      expect(entry.dataUpdatedAt).toBeNull()
+    })
+  })
+
+  describe('delete with cancelInflight', () => {
+    it('aborts inflight request on delete', () => {
+      const cache = new QueryCache()
+      const entry = cache.getOrCreate('/users')
+      const controller = new AbortController()
+      entry.abortController = controller
+
+      cache.delete('/users')
+
+      expect(controller.signal.aborted).toBe(true)
+    })
+  })
+
+  describe('clear with abort', () => {
+    it('aborts all controllers on clear', () => {
+      const cache = new QueryCache()
+      const entry1 = cache.getOrCreate('/users')
+      const entry2 = cache.getOrCreate('/posts')
+      const c1 = new AbortController()
+      const c2 = new AbortController()
+      entry1.abortController = c1
+      entry2.abortController = c2
+
+      cache.clear()
+
+      expect(c1.signal.aborted).toBe(true)
+      expect(c2.signal.aborted).toBe(true)
+    })
+  })
+
+  describe('destroy', () => {
+    it('sets disposed flag and clears cache', () => {
+      const cache = new QueryCache()
+      cache.getOrCreate('/users')
+
+      cache.destroy()
+
+      expect(cache.isDisposed()).toBe(true)
+      expect(cache.get('/users')).toBeUndefined()
+    })
+
+    it('aborts all controllers on destroy', () => {
+      const cache = new QueryCache()
+      const entry = cache.getOrCreate('/users')
+      const controller = new AbortController()
+      entry.abortController = controller
+
+      cache.destroy()
+
+      expect(controller.signal.aborted).toBe(true)
+    })
+
+    it('GC timer does not evict after destroy', () => {
+      const onEvict = vi.fn()
+      const cache = new QueryCache(0, 500, onEvict)
+      cache.getOrCreate('/users', 0, 500)
+      cache.addSubscriber('/users')
+      cache.removeSubscriber('/users') // schedules GC
+
+      cache.destroy()
+
+      vi.advanceTimersByTime(1000)
+
+      // onEvict should not be called by the GC timer after destroy
+      // (it was called during destroy's clear())
+      expect(onEvict).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('GC with disposed guard', () => {
+    it('GC timer is a no-op after destroy', () => {
+      const onEvict = vi.fn()
+      const cache = new QueryCache(0, 500, onEvict)
+
+      // Create entry, add and remove subscriber to schedule GC
+      cache.getOrCreate('/late', 0, 500)
+      cache.addSubscriber('/late')
+      cache.removeSubscriber('/late')
+
+      // Destroy before GC fires
+      cache.destroy()
+
+      // Advance past GC time
+      vi.advanceTimersByTime(1000)
+
+      // GC should not call onEvict because disposed
+      expect(onEvict).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('getOrCreate initializes abortController', () => {
+    it('initializes abortController as null', () => {
+      const cache = new QueryCache()
+      const entry = cache.getOrCreate('/users')
+      expect(entry.abortController).toBeNull()
+    })
+  })
+
   describe('keys', () => {
     it('returns all cache keys', () => {
       const cache = new QueryCache()

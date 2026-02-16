@@ -423,4 +423,156 @@ describe('createQuery', () => {
     expect(query.data).toEqual([{ id: '1' }])
     expect(query.isFetching).toBe(false)
   })
+
+  it('stores abort controller on cache entry during fetch', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: (ctx: any) => {
+        capturedSignal = ctx.signal
+        return Promise.resolve([{ id: '1' }])
+      },
+    }, deps)
+
+    await query()
+
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+  })
+
+  it('passes abort controller signal to fn', async () => {
+    let capturedSignal: AbortSignal | undefined
+    let resolvePromise: (v: any) => void
+    const fetchPromise = new Promise((resolve) => { resolvePromise = resolve })
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: (ctx: any) => {
+        capturedSignal = ctx.signal
+        return fetchPromise
+      },
+    }, deps)
+
+    const p = query()
+    expect(capturedSignal).toBeInstanceOf(AbortSignal)
+    expect(capturedSignal!.aborted).toBe(false)
+
+    resolvePromise!([])
+    await p
+  })
+
+  it('abort controller is aborted on invalidate', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: (ctx: any) => {
+        capturedSignal = ctx.signal
+        return new Promise(() => {}) // never resolves
+      },
+    }, deps)
+
+    query() // start fetch, don't await
+
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    query.invalidate()
+
+    expect(capturedSignal!.aborted).toBe(true)
+  })
+
+  it('links user-provided signal to internal controller', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: (ctx: any) => {
+        capturedSignal = ctx.signal
+        return new Promise(() => {})
+      },
+    }, deps)
+
+    const userController = new AbortController()
+    query({ signal: userController.signal })
+
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    userController.abort('user cancelled')
+
+    expect(capturedSignal!.aborted).toBe(true)
+  })
+
+  it('handles already-aborted user signal', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: (ctx: any) => {
+        capturedSignal = ctx.signal
+        return new Promise(() => {})
+      },
+    }, deps)
+
+    const userController = new AbortController()
+    userController.abort('pre-aborted')
+    query({ signal: userController.signal })
+
+    expect(capturedSignal!.aborted).toBe(true)
+  })
+
+  it('clears abort controller on settled', async () => {
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1' }]),
+    }, deps)
+
+    await query()
+
+    const entry = deps.queryCache.get('/users')
+    expect(entry?.abortController).toBeNull()
+  })
+
+  it('emits a one-time warning for getter on parameterized query', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users/:id',
+      fn: () => Promise.resolve({ id: '1' }),
+    }, deps)
+
+    // First access should warn
+    void query.status
+    expect(warnSpy).toHaveBeenCalledOnce()
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('parameterized query')
+    )
+
+    // Second access should not warn again
+    warnSpy.mockClear()
+    void query.data
+    expect(warnSpy).not.toHaveBeenCalled()
+
+    warnSpy.mockRestore()
+  })
+
+  it('does not warn for non-parameterized query getters', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([]),
+    }, deps)
+
+    void query.status
+    void query.data
+    void query.error
+    expect(warnSpy).not.toHaveBeenCalled()
+
+    warnSpy.mockRestore()
+  })
 })

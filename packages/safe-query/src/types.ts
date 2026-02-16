@@ -100,6 +100,7 @@ export type CacheEntry<TData> = {
   generation: number
   inflightPromise: Promise<SafeResult<unknown, unknown>> | null
   entityKeys: Set<string>
+  abortController: AbortController | null
 }
 
 // ─── Search Params ───
@@ -145,13 +146,13 @@ export type SafeQueryConfig<E> = {
 export type QueryFnContext<TPath extends string> = {
   searchParams?: SearchParams
   signal?: AbortSignal
-} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
+} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : unknown)
 
 export type MutationFnContext<TPath extends string, TBody> = {
   searchParams?: SearchParams
   signal?: AbortSignal
-} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
-  & ([TBody] extends [void | undefined] ? {} : { body: TBody })
+} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : unknown)
+  & ([TBody] extends [void | undefined] ? unknown : { body: TBody })
 
 // ─── Lifecycle Callbacks ───
 
@@ -211,7 +212,7 @@ export type QueryInvokeOptions<TPath extends string> =
 
 export type MutationInvokeOptions<TPath extends string, TBody> =
   { searchParams?: SearchParams; signal?: AbortSignal }
-  & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
+  & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : unknown)
   & ([TBody] extends [void | undefined] ? { body?: unknown } : { body: TBody })
 
 export type KeyOptions<TPath extends string> =

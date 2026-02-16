@@ -696,4 +696,27 @@ describe('safeQuery', () => {
     expect(lastState.status).toBe('success')
     expect(lastState.data).toEqual({ id: '1', name: 'Alice' })
   })
+
+  // ─── destroy cancels in-flight queries ───
+
+  it('destroy aborts in-flight query signals', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const api = createClient()
+    const usersQuery = api.query({
+      key: '/users',
+      fn: (ctx: any) => {
+        capturedSignal = ctx.signal
+        return new Promise(() => {}) // never resolves
+      },
+    })
+
+    usersQuery() // start fetch, don't await
+
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    api.destroy()
+
+    expect(capturedSignal!.aborted).toBe(true)
+  })
 })

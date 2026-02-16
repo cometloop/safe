@@ -321,4 +321,106 @@ describe('EntityStore', () => {
       expect(snap.get('user')?.get('1')).toEqual({ name: 'Alice' })
     })
   })
+
+  describe('beginOptimistic / endOptimistic', () => {
+    it('saves base value on first call', () => {
+      const store = new EntityStore()
+      store.set('user', '1', { name: 'Alice' })
+
+      store.beginOptimistic('user', '1')
+
+      // Modify entity
+      store.set('user', '1', { name: 'Bob' })
+
+      // End with error → should restore base value
+      const keys = store.endOptimistic('user', '1', false)
+      expect(store.get('user', '1')).toEqual({ name: 'Alice' })
+      expect(keys).toBeDefined()
+    })
+
+    it('restores undefined base when entity did not exist', () => {
+      const store = new EntityStore()
+
+      store.beginOptimistic('user', '1')
+      store.set('user', '1', { name: 'Optimistic' })
+
+      const keys = store.endOptimistic('user', '1', false)
+      expect(store.get('user', '1')).toBeUndefined()
+      expect(keys).toBeDefined()
+    })
+
+    it('increments count on concurrent calls', () => {
+      const store = new EntityStore()
+      store.set('user', '1', { name: 'Alice' })
+
+      store.beginOptimistic('user', '1')
+      store.set('user', '1', { name: 'Bob' })
+
+      store.beginOptimistic('user', '1')
+      store.set('user', '1', { name: 'Charlie' })
+
+      // First end: counter > 0, should return null
+      const result1 = store.endOptimistic('user', '1', true)
+      expect(result1).toBeNull()
+      expect(store.get('user', '1')).toEqual({ name: 'Charlie' })
+
+      // Second end (success): discards tracking, no restore
+      const result2 = store.endOptimistic('user', '1', true)
+      expect(result2).toBeNull()
+      expect(store.get('user', '1')).toEqual({ name: 'Charlie' })
+    })
+
+    it('rolls back on error when concurrent mutations settle', () => {
+      const store = new EntityStore()
+      store.set('user', '1', { name: 'Alice' })
+      store.registerQueryEntities('q1', new Set(['user:1']))
+
+      store.beginOptimistic('user', '1')
+      store.set('user', '1', { name: 'Bob' })
+
+      store.beginOptimistic('user', '1')
+      store.set('user', '1', { name: 'Charlie' })
+
+      // First settles with error
+      const result1 = store.endOptimistic('user', '1', false)
+      expect(result1).toBeNull() // counter still > 0
+
+      // Second settles with success → but hadError is true, so rollback
+      const result2 = store.endOptimistic('user', '1', true)
+      expect(result2).toEqual(new Set(['q1']))
+      expect(store.get('user', '1')).toEqual({ name: 'Alice' })
+    })
+
+    it('returns null when endOptimistic called without beginOptimistic', () => {
+      const store = new EntityStore()
+      const result = store.endOptimistic('user', '1', true)
+      expect(result).toBeNull()
+    })
+
+    it('clearOptimistic removes all tracking state', () => {
+      const store = new EntityStore()
+      store.set('user', '1', { name: 'Alice' })
+      store.beginOptimistic('user', '1')
+      store.set('user', '1', { name: 'Bob' })
+
+      store.clearOptimistic()
+
+      // After clearing optimistic state, endOptimistic should be a no-op
+      const result = store.endOptimistic('user', '1', false)
+      expect(result).toBeNull()
+      // Entity should remain as-is (no rollback since tracking was cleared)
+      expect(store.get('user', '1')).toEqual({ name: 'Bob' })
+    })
+
+    it('clear() also clears optimistic state', () => {
+      const store = new EntityStore()
+      store.set('user', '1', { name: 'Alice' })
+      store.beginOptimistic('user', '1')
+
+      store.clear()
+
+      const result = store.endOptimistic('user', '1', false)
+      expect(result).toBeNull()
+    })
+  })
 })

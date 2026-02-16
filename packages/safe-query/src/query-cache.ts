@@ -2,6 +2,7 @@ import type { CacheEntry, SearchParams } from './types'
 
 export class QueryCache {
   private cache = new Map<string, CacheEntry<unknown>>()
+  private disposed = false
 
   private defaultStaleTime: number
   private defaultGcTime: number
@@ -69,6 +70,7 @@ export class QueryCache {
         generation: 0,
         inflightPromise: null,
         entityKeys: new Set(),
+        abortController: null,
       }
       this.cache.set(key, entry)
     }
@@ -99,9 +101,21 @@ export class QueryCache {
     entry.error = error
   }
 
+  cancelInflight(key: string): void {
+    const entry = this.cache.get(key)
+    if (!entry) return
+    entry.generation++
+    if (entry.abortController) {
+      entry.abortController.abort()
+      entry.abortController = null
+    }
+    entry.inflightPromise = null
+  }
+
   invalidate(key: string): void {
     const entry = this.cache.get(key)
     if (entry) {
+      this.cancelInflight(key)
       entry.dataUpdatedAt = null
     }
   }
@@ -110,6 +124,7 @@ export class QueryCache {
     const invalidatedKeys: string[] = []
     for (const [key, entry] of this.cache) {
       if (key.startsWith(prefix)) {
+        this.cancelInflight(key)
         entry.dataUpdatedAt = null
         invalidatedKeys.push(key)
       }
@@ -120,6 +135,7 @@ export class QueryCache {
   invalidateAll(): string[] {
     const invalidatedKeys: string[] = []
     for (const [key, entry] of this.cache) {
+      this.cancelInflight(key)
       entry.dataUpdatedAt = null
       invalidatedKeys.push(key)
     }
@@ -153,8 +169,10 @@ export class QueryCache {
       clearTimeout(entry.gcTimer)
     }
     entry.gcTimer = setTimeout(() => {
+      if (this.disposed) return
       // Double check no subscribers were added
       if (entry.subscriberCount === 0) {
+        this.cancelInflight(key)
         this.cache.delete(key)
         this.onEvict?.(key)
       }
@@ -165,6 +183,7 @@ export class QueryCache {
   delete(key: string): void {
     const entry = this.cache.get(key)
     if (entry) {
+      this.cancelInflight(key)
       if (entry.gcTimer !== null) {
         clearTimeout(entry.gcTimer)
       }
@@ -174,12 +193,25 @@ export class QueryCache {
   }
 
   clear(): void {
-    for (const [key, entry] of this.cache) {
+    for (const [, entry] of this.cache) {
+      if (entry.abortController) {
+        entry.abortController.abort()
+        entry.abortController = null
+      }
       if (entry.gcTimer !== null) {
         clearTimeout(entry.gcTimer)
       }
-      this.cache.delete(key)
     }
+    this.cache.clear()
+  }
+
+  destroy(): void {
+    this.disposed = true
+    this.clear()
+  }
+
+  isDisposed(): boolean {
+    return this.disposed
   }
 
   keys(): IterableIterator<string> {

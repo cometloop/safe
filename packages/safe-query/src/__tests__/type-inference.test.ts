@@ -37,9 +37,9 @@ describe('Type inference', () => {
 
     if (!err) {
       // users is typed as User[]
-      const first: User = users[0]
-      expect(first.name).toBe('Alice')
-      expect(first.email).toBe('alice@test.com')
+      const first: User | undefined = users[0]
+      expect(first?.name).toBe('Alice')
+      expect(first?.email).toBe('alice@test.com')
     }
   })
 
@@ -197,8 +197,8 @@ describe('Type inference', () => {
       // state.data is User[] | undefined
       // state.error is AppError | null
       if (state.data) {
-        const first: User = state.data[0]
-        expect(first.name).toBeDefined()
+        const first: User | undefined = state.data[0]
+        expect(first?.name).toBeDefined()
       }
       if (state.error) {
         const code: string = state.error.code

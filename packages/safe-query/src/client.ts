@@ -123,7 +123,7 @@ export function safeQuery<E>(
     destroy(): void {
       if (disposed) return
       disposed = true
-      queryCache.clear()
+      queryCache.destroy()
       entityStore.clear()
       notifier.clear()
     },
