@@ -167,7 +167,11 @@ export class EntityStore {
   snapshot(): EntitySnapshot {
     const snap = new Map<string, Map<string, unknown>>()
     for (const [type, typeMap] of this.entities) {
-      snap.set(type, new Map(typeMap))
+      const clonedMap = new Map<string, unknown>()
+      for (const [id, entity] of typeMap) {
+        clonedMap.set(id, structuredClone(entity))
+      }
+      snap.set(type, clonedMap)
     }
     return snap
   }

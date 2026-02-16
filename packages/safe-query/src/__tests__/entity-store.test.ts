@@ -320,6 +320,41 @@ describe('EntityStore', () => {
       // Snapshot should still have original value
       expect(snap.get('user')?.get('1')).toEqual({ name: 'Alice' })
     })
+
+    it('snapshot deep copies entity values', () => {
+      const store = new EntityStore()
+      const entity = { name: 'Alice', tags: ['admin'] }
+      store.set('user', '1', entity)
+
+      const snap = store.snapshot()
+
+      // Mutating the original entity in-place should not affect the snapshot
+      entity.name = 'Mutated'
+      entity.tags.push('hacked')
+
+      const snapshotEntity = snap.get('user')?.get('1') as any
+      expect(snapshotEntity.name).toBe('Alice')
+      expect(snapshotEntity.tags).toEqual(['admin'])
+    })
+
+    it('snapshot deep copies nested objects', () => {
+      const store = new EntityStore()
+      store.set('user', '1', {
+        name: 'Alice',
+        profile: { bio: 'original', settings: { theme: 'dark' } },
+      })
+
+      const snap = store.snapshot()
+
+      // Mutate the entity in the store after snapshot
+      const current = store.get('user', '1') as any
+      current.profile.bio = 'mutated'
+      current.profile.settings.theme = 'light'
+
+      const snapshotEntity = snap.get('user')?.get('1') as any
+      expect(snapshotEntity.profile.bio).toBe('original')
+      expect(snapshotEntity.profile.settings.theme).toBe('dark')
+    })
   })
 
   describe('beginOptimistic / endOptimistic', () => {

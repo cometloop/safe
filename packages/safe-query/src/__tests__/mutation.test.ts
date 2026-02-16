@@ -514,6 +514,52 @@ describe('createMutation', () => {
     })
   })
 
+  it('composes user signal with retry signal', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const fn = vi.fn().mockImplementation((ctx: any) => {
+      capturedSignal = ctx.signal
+      return new Promise(() => {}) // never resolves
+    })
+
+    const deps = createDeps()
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+    }, deps)
+
+    const userController = new AbortController()
+    mutation({ body: { name: 'Alice' }, signal: userController.signal })
+
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    // User signal should abort the composed signal
+    userController.abort('user cancelled')
+    expect(capturedSignal!.aborted).toBe(true)
+  })
+
+  it('handles already-aborted user signal in mutation', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const fn = vi.fn().mockImplementation((ctx: any) => {
+      capturedSignal = ctx.signal
+      return new Promise(() => {})
+    })
+
+    const deps = createDeps()
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+    }, deps)
+
+    const userController = new AbortController()
+    userController.abort('pre-aborted')
+    mutation({ body: { name: 'Alice' }, signal: userController.signal })
+
+    expect(capturedSignal!.aborted).toBe(true)
+  })
+
   it('concurrent mutations: both succeed without conflict', async () => {
     let resolve1: (v: any) => void
     let resolve2: (v: any) => void

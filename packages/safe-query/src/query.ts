@@ -101,7 +101,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
         const state = getState(key)
         return Promise.resolve([state.data!, null] as unknown as SafeResult<TParsed, E>)
       }
-      return Promise.resolve([null, null] as unknown as SafeResult<TParsed, E>)
+      return safeInstance.async<TParsed>(() => { throw new Error('Query is disabled') })
     }
 
     const invokeOnSuccess = options?.onSuccess

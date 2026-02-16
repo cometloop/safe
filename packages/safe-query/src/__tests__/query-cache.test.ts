@@ -34,7 +34,7 @@ describe('QueryCache', () => {
       const cache = new QueryCache()
       expect(
         cache.buildKey('/users', undefined, { search: 'foo', page: 2 })
-      ).toBe('/users?~page=2&search=foo')
+      ).toBe('/users?~page=2&~search=foo')
     })
 
     it('includes both path params and search params in key', () => {
@@ -55,12 +55,41 @@ describe('QueryCache', () => {
       const cache = new QueryCache()
       expect(
         cache.buildKey('/users', undefined, { tag: ['a', 'b'] })
-      ).toBe('/users?~tag=a&tag=b')
+      ).toBe('/users?~tag=a&~tag=b')
     })
 
     it('handles empty search params', () => {
       const cache = new QueryCache()
       expect(cache.buildKey('/users', undefined, {})).toBe('/users')
+    })
+
+    it('prefixes every search param key with ~ to avoid collision with path params', () => {
+      const cache = new QueryCache()
+      // Each search param key should get a ~ prefix
+      expect(
+        cache.buildKey('/users', undefined, { page: 1, limit: 10 })
+      ).toBe('/users?~limit=10&~page=1')
+    })
+
+    it('produces different keys when path param and search param share a name', () => {
+      const cache = new QueryCache()
+      const keyWithPathParam = cache.buildKey('/items', { id: '1' })
+      const keyWithSearchParam = cache.buildKey('/items', undefined, { id: '1' })
+      expect(keyWithPathParam).not.toBe(keyWithSearchParam)
+    })
+
+    it('prefixes every search param key with ~ when combined with path params', () => {
+      const cache = new QueryCache()
+      expect(
+        cache.buildKey('/users/:id', { id: '1' }, { page: 1, limit: 10 })
+      ).toBe('/users/:id?id=1&~limit=10&~page=1')
+    })
+
+    it('prefixes all array search param keys with ~', () => {
+      const cache = new QueryCache()
+      expect(
+        cache.buildKey('/users', undefined, { tag: ['a', 'b'], sort: 'name' })
+      ).toBe('/users?~sort=name&~tag=a&~tag=b')
     })
   })
 

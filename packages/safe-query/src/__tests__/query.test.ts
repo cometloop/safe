@@ -560,6 +560,50 @@ describe('createQuery', () => {
     warnSpy.mockRestore()
   })
 
+  it('returns error when enabled: false and no cached data', async () => {
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1' }]),
+    }, deps)
+
+    const [data, err] = await query({ enabled: false })
+    // Should be a proper error, not [null, null]
+    expect(data).toBeNull()
+    expect(err).toBeTruthy()
+    expect(typeof err).toBe('string')
+  })
+
+  it('returns cached data when enabled: false and cache exists', async () => {
+    const users = [{ id: '1', name: 'Alice' }]
+    const deps = createDeps({ defaultStaleTime: 60000 })
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve(users),
+      staleTime: 60000,
+    }, deps)
+
+    // Populate cache
+    await query()
+
+    // Disabled query should still return cached data
+    const [data, err] = await query({ enabled: false })
+    expect(err).toBeNull()
+    expect(data).toEqual(users)
+  })
+
+  it('does not fetch when enabled: false', async () => {
+    const fn = vi.fn().mockResolvedValue([{ id: '1' }])
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn,
+    }, deps)
+
+    await query({ enabled: false })
+    expect(fn).not.toHaveBeenCalled()
+  })
+
   it('does not warn for non-parameterized query getters', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const deps = createDeps()

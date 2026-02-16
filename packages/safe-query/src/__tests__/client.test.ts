@@ -430,7 +430,7 @@ describe('safeQuery', () => {
 
   // ─── enabled: false ───
 
-  it('enabled: false skips fetch and returns [null, null]', async () => {
+  it('enabled: false skips fetch and returns error', async () => {
     const fn = vi.fn().mockResolvedValue([])
     const api = createClient()
     const usersQuery = api.query({ key: '/users', fn })
@@ -438,7 +438,7 @@ describe('safeQuery', () => {
     const [result, err] = await usersQuery({ enabled: false })
     expect(fn).not.toHaveBeenCalled()
     expect(result).toBeNull()
-    expect(err).toBeNull()
+    expect(err).toBeTruthy()
   })
 
   it('enabled: false returns cached data if available', async () => {

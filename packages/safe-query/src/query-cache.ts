@@ -34,14 +34,14 @@ export class QueryCache {
       for (const [k, v] of sorted) {
         if (Array.isArray(v)) {
           for (const item of v) {
-            parts.push(`${k}=${String(item)}`)
+            parts.push(`~${k}=${String(item)}`)
           }
         } else {
-          parts.push(`${k}=${String(v)}`)
+          parts.push(`~${k}=${String(v)}`)
         }
       }
       if (parts.length > 0) {
-        key += `${params ? '&' : '?'}~${parts.join('&')}`
+        key += `${params ? '&' : '?'}${parts.join('&')}`
       }
     }
     return key

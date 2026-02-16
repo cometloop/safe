@@ -115,7 +115,25 @@ export function createMutation<
     return safeInstance.async<TData, TParsed>(
       (signal) => {
         const context = { ...options }
-        if (signal) context.signal = options?.signal ?? signal
+        if (signal || options?.signal) {
+          // Compose both signals: if either aborts, the composed controller aborts
+          const controller = new AbortController()
+          if (signal) {
+            if (signal.aborted) {
+              controller.abort(signal.reason)
+            } else {
+              signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+            }
+          }
+          if (options?.signal) {
+            if (options.signal.aborted) {
+              controller.abort(options.signal.reason)
+            } else {
+              options.signal.addEventListener('abort', () => controller.abort(options.signal!.reason), { once: true })
+            }
+          }
+          context.signal = controller.signal
+        }
         return config.fn(context as MutationFnContext<TPath, TBody>)
       },
       {
