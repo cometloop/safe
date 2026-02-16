@@ -153,6 +153,14 @@ export type MutationFnContext<TPath extends string, TBody> = {
 } & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
   & ([TBody] extends [void | undefined] ? {} : { body: TBody })
 
+// ─── Lifecycle Callbacks ───
+
+export type LifecycleCallbacks<TData, TError = unknown> = {
+  onSuccess?: (data: TData) => void
+  onError?: (error: TError) => void
+  onSettled?: (data: TData | undefined, error: TError | null) => void
+}
+
 // ─── Query Config ───
 
 export type QueryConfig<TData, TPath extends string = string, TParsed = TData> = {
@@ -163,7 +171,7 @@ export type QueryConfig<TData, TPath extends string = string, TParsed = TData> =
   staleTime?: number
   gcTime?: number
   retry?: RetryConfig
-}
+} & LifecycleCallbacks<TParsed>
 
 // ─── Mutation Config ───
 
@@ -192,14 +200,14 @@ export type MutationConfig<
   entities?: EntityExtractors<TParsed>
   optimistic?: OptimisticConfig<TPath>
   retry?: RetryConfig
-}
+} & LifecycleCallbacks<TParsed>
 
 // ─── Invoke Options ───
 
 export type QueryInvokeOptions<TPath extends string> =
   [HasPathParams<TPath>] extends [true]
-    ? { params: PathParams<TPath>; searchParams?: SearchParams; signal?: AbortSignal }
-    : { searchParams?: SearchParams; signal?: AbortSignal } | void
+    ? { params: PathParams<TPath>; searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean }
+    : { searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean } | void
 
 export type MutationInvokeOptions<TPath extends string, TBody> =
   { searchParams?: SearchParams; signal?: AbortSignal }
@@ -214,7 +222,7 @@ export type KeyOptions<TPath extends string> =
 // ─── Callable Types ───
 
 export type QueryCallable<TData, TError, TPath extends string> = {
-  (options?: QueryInvokeOptions<TPath>): Promise<SafeResult<TData, TError>>
+  (options?: QueryInvokeOptions<TPath> & LifecycleCallbacks<TData, TError>): Promise<SafeResult<TData, TError>>
   subscribe: (
     callback: (state: QueryState<TData, TError>) => void,
     options?: KeyOptions<TPath> extends void ? void : KeyOptions<TPath>
@@ -229,7 +237,7 @@ export type QueryCallable<TData, TError, TPath extends string> = {
 }
 
 export type MutationCallable<TData, TError, TPath extends string, TBody> = {
-  (options: MutationInvokeOptions<TPath, TBody>): Promise<SafeResult<TData, TError>>
+  (options: MutationInvokeOptions<TPath, TBody> & LifecycleCallbacks<TData, TError>): Promise<SafeResult<TData, TError>>
 }
 
 // ─── Subscriber callback ───

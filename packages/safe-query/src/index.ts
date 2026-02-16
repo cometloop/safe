@@ -25,6 +25,7 @@ export type {
   Subscriber,
   SearchParamValue,
   SearchParams,
+  LifecycleCallbacks,
 } from './types'
 export { HttpError } from './types'
 export { QueryCache } from './query-cache'

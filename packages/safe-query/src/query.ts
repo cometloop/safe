@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext } from './types'
+import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext, LifecycleCallbacks } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
@@ -33,6 +33,9 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
   const parseResponse = config.parseResponse
   const entities = config.entities
   const retry = config.retry
+  const configOnSuccess = config.onSuccess
+  const configOnError = config.onError
+  const configOnSettled = config.onSettled
 
   function getState(key: string): QueryState<TParsed, E> {
     const entry = queryCache.get(key)
@@ -74,7 +77,24 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
     }
   }
 
-  function invoke(options?: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal }): Promise<SafeResult<TParsed, E>> {
+  function invoke(options?: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean } & LifecycleCallbacks<TParsed, E>): Promise<SafeResult<TParsed, E>> {
+    // Skip fetch when disabled
+    if (options?.enabled === false) {
+      const params = options?.params
+      const searchParams = options?.searchParams
+      const key = queryCache.buildKey(path, params, searchParams)
+      const entry = queryCache.get(key)
+      if (entry?.data !== undefined) {
+        const state = getState(key)
+        return Promise.resolve([state.data!, null] as unknown as SafeResult<TParsed, E>)
+      }
+      return Promise.resolve([null, null] as unknown as SafeResult<TParsed, E>)
+    }
+
+    const invokeOnSuccess = options?.onSuccess
+    const invokeOnError = options?.onError
+    const invokeOnSettled = options?.onSettled
+
     const params = options?.params
     const searchParams = options?.searchParams
     const key = queryCache.buildKey(path, params, searchParams)
@@ -118,15 +138,25 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
           } else {
             queryCache.setData(key, result, undefined, new Set())
           }
+
+          configOnSuccess?.(result)
+          invokeOnSuccess?.(result)
         },
         onError: (error) => {
           if (entry.generation !== generation) return
           queryCache.setError(key, error)
+
+          configOnError?.(error as E)
+          invokeOnError?.(error as E)
         },
         onSettled: () => {
           if (entry.generation !== generation) return
           entry.inflightPromise = null
           notifier.notify(key)
+
+          const state = getState(key)
+          configOnSettled?.(state.data, state.error)
+          invokeOnSettled?.(state.data, state.error)
         },
       }
     )

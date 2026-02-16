@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { MutationConfig, MutationCallable, SearchParams, MutationFnContext } from './types'
+import type { MutationConfig, MutationCallable, SearchParams, MutationFnContext, LifecycleCallbacks } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
@@ -40,6 +40,9 @@ export function createMutation<
   const entities = config.entities
   const retry = config.retry
   const optimisticConfig = config.optimistic
+  const configOnSuccess = config.onSuccess
+  const configOnError = config.onError
+  const configOnSettled = config.onSettled
 
   function resolveOptimistic(params?: Record<string, string>): {
     entityType: string
@@ -71,9 +74,12 @@ export function createMutation<
     return { entityType, entityId }
   }
 
-  function invoke(options: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; body?: unknown }): Promise<SafeResult<TParsed, E>> {
+  function invoke(options: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; body?: unknown } & LifecycleCallbacks<TParsed, E>): Promise<SafeResult<TParsed, E>> {
     const params = options?.params
     const body = options?.body
+    const invokeOnSuccess = options?.onSuccess
+    const invokeOnError = options?.onError
+    const invokeOnSettled = options?.onSettled
     const opt = resolveOptimistic(params)
 
     // Optimistic update flow
@@ -136,8 +142,11 @@ export function createMutation<
             }
             notifier.notifyMany(queryKeys)
           }
+
+          configOnSuccess?.(result)
+          invokeOnSuccess?.(result)
         },
-        onError: () => {
+        onError: (error) => {
           // Rollback optimistic update
           if (snapshot) {
             entityStore.restore(snapshot)
@@ -149,6 +158,13 @@ export function createMutation<
               notifier.notifyMany(affectedQueryKeys)
             }
           }
+
+          configOnError?.(error as E)
+          invokeOnError?.(error as E)
+        },
+        onSettled: (result, error) => {
+          configOnSettled?.(result as TParsed | undefined, error as E | null)
+          invokeOnSettled?.(result as TParsed | undefined, error as E | null)
         },
       }
     )

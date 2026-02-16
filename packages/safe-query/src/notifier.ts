@@ -46,4 +46,8 @@ export class Notifier {
     const set = this.listeners.get(key)
     return set !== undefined && set.size > 0
   }
+
+  clear(): void {
+    this.listeners.clear()
+  }
 }

@@ -165,4 +165,9 @@ export class EntityStore {
       this.entities.set(type, new Map(typeMap))
     }
   }
+
+  clear(): void {
+    this.entities.clear()
+    this.entityToQueries.clear()
+  }
 }

@@ -104,6 +104,26 @@ export class QueryCache {
     }
   }
 
+  invalidateByPrefix(prefix: string): string[] {
+    const invalidatedKeys: string[] = []
+    for (const [key, entry] of this.cache) {
+      if (key.startsWith(prefix)) {
+        entry.dataUpdatedAt = null
+        invalidatedKeys.push(key)
+      }
+    }
+    return invalidatedKeys
+  }
+
+  invalidateAll(): string[] {
+    const invalidatedKeys: string[] = []
+    for (const [key, entry] of this.cache) {
+      entry.dataUpdatedAt = null
+      invalidatedKeys.push(key)
+    }
+    return invalidatedKeys
+  }
+
   addSubscriber(key: string): void {
     const entry = this.cache.get(key)
     if (entry) {
