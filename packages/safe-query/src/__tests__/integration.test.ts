@@ -351,4 +351,89 @@ describe('Integration', () => {
     const [, err] = await clearAll({})
     expect(err).toBeNull()
   })
+
+  it('list-to-detail with initialData — use getEntity in detail query for instant return', async () => {
+    const users = [
+      { id: '1', name: 'Alice', __type: 'user' as const },
+      { id: '2', name: 'Bob', __type: 'user' as const },
+    ]
+
+    const api = createApi()
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve(users),
+      entities: { user: (u: any) => u.id },
+    })
+
+    // Populate the list query cache + entity store
+    await usersQuery()
+
+    const detailFn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice', __type: 'user' })
+    const userQuery = api.query({
+      key: '/users/:id',
+      fn: detailFn,
+      staleTime: 60000,
+      initialData: (ctx: any) => ctx.getEntity('user', ctx.params.id),
+      initialDataUpdatedAt: Date.now(),
+    })
+
+    // Detail query should return entity from store without fetching
+    const [result, err] = await userQuery({ params: { id: '1' } })
+    expect(err).toBeNull()
+    expect(result).toEqual(expect.objectContaining({ id: '1', name: 'Alice' }))
+    expect(detailFn).not.toHaveBeenCalled()
+  })
+
+  it('list-to-detail with placeholderData — entity shown as placeholder while fetching', async () => {
+    const users = [
+      { id: '1', name: 'Alice', __type: 'user' as const },
+    ]
+
+    const api = createApi()
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve(users),
+      entities: { user: (u: any) => u.id },
+    })
+
+    // Populate entity store
+    await usersQuery()
+
+    let resolveDetail: (value: any) => void
+    const detailPromise = new Promise((resolve) => { resolveDetail = resolve })
+
+    const userQuery = api.query({
+      key: '/users/:id',
+      fn: () => detailPromise as Promise<any>,
+      placeholderData: (ctx: any) => ctx.getEntity('user', ctx.params.id),
+    })
+
+    const states: any[] = []
+    const unsub = userQuery.subscribe((state: any) => {
+      states.push({ ...state })
+    }, { params: { id: '1' } })
+
+    // Start fetch
+    userQuery({ params: { id: '1' } })
+
+    // Should have a placeholder state with entity data
+    const placeholderState = states.find((s: any) => s.isPlaceholderData)
+    expect(placeholderState).toBeDefined()
+    expect(placeholderState.data).toEqual(expect.objectContaining({ id: '1', name: 'Alice' }))
+    expect(placeholderState.isFetching).toBe(true)
+    expect(placeholderState.status).toBe('success')
+
+    resolveDetail!({ id: '1', name: 'Alice (full)', __type: 'user' })
+
+    // Wait for settle
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    const lastState = states[states.length - 1]
+    expect(lastState.isPlaceholderData).toBe(false)
+    expect(lastState.data).toEqual(expect.objectContaining({ id: '1', name: 'Alice (full)' }))
+
+    unsub()
+  })
 })

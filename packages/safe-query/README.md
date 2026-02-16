@@ -166,12 +166,13 @@ Query callables have reactive getters and methods attached directly to the funct
 ```typescript
 // Subscribe to state changes
 const unsub = getUsers.subscribe((state) => {
-  state.data          // User[] | undefined
-  state.error         // AppError | null
-  state.status        // 'idle' | 'loading' | 'success' | 'error'
-  state.isFetching    // boolean
-  state.isStale       // boolean
-  state.dataUpdatedAt // number | null
+  state.data              // User[] | undefined
+  state.error             // AppError | null
+  state.status            // 'idle' | 'loading' | 'success' | 'error'
+  state.isFetching        // boolean
+  state.isStale           // boolean
+  state.dataUpdatedAt     // number | null
+  state.isPlaceholderData // boolean
 })
 
 // Reactive getters on the callable itself
@@ -202,6 +203,120 @@ const [user, err] = await getUser({
   enabled: !!userId, // no network request when userId is falsy
 })
 ```
+
+## Initial Data
+
+Use `initialData` to pre-populate a query's cache so it returns data immediately without fetching. This is treated as real cached data — it enters the cache, populates the entity store (if `entities` is configured), and is subject to `staleTime`.
+
+```typescript
+// Static initial data — useful for SSR hydration or known defaults
+const getSettings = api.query({
+  key: '/settings',
+  fn: () => fetchJson<Settings>('/api/settings'),
+  staleTime: 60_000,
+  initialData: { theme: 'light', locale: 'en' },
+  initialDataUpdatedAt: Date.now(), // treated as "fetched just now"
+})
+```
+
+### `initialDataUpdatedAt`
+
+Controls when the initial data is considered to have been fetched. If omitted, `Date.now()` is used (from when it was seeded). Set this to an earlier timestamp to trigger an immediate background refetch:
+
+```typescript
+const getUser = api.query({
+  key: '/users/:id',
+  fn: ({ params }) => fetchJson<User>(`/api/users/${params.id}`),
+  staleTime: 60_000,
+  initialData: (ctx) => ctx.getEntity('user', ctx.params.id),
+  initialDataUpdatedAt: Date.now() - 120_000, // "2 minutes ago" → stale → triggers refetch
+})
+```
+
+### Function Form and List-to-Detail Pattern
+
+The function form receives a context with `getEntity` (to pull from the entity store) and route `params`/`searchParams`. This enables the list-to-detail pattern — seed a detail query from a previously fetched list:
+
+```typescript
+// 1. List query normalizes users into the entity store
+const getUsers = api.query({
+  key: '/users',
+  fn: () => fetchJson<User[]>('/api/users'),
+  entities: { user: (u) => u.id },
+})
+await getUsers() // populates entity store
+
+// 2. Detail query pulls from entity store — instant, no loading state
+const getUser = api.query({
+  key: '/users/:id',
+  fn: ({ params }) => fetchJson<User>(`/api/users/${params.id}`),
+  staleTime: 60_000,
+  initialData: (ctx) => ctx.getEntity('user', ctx.params.id) as User | undefined,
+  initialDataUpdatedAt: Date.now(),
+})
+
+const [user, err] = await getUser({ params: { id: '1' } })
+// Returns Alice immediately from entity store, no network request
+```
+
+Return `undefined` from the function to skip seeding (e.g., when the entity isn't in the store yet):
+
+```typescript
+initialData: (ctx) => {
+  const entity = ctx.getEntity('user', ctx.params.id)
+  return entity ? (entity as User) : undefined // undefined = no seeding, fetch normally
+}
+```
+
+`initialData` also works with `enabled: false` — the seeded data is returned instead of a `QueryDisabledError`:
+
+```typescript
+const [user, err] = await getUser({
+  params: { id: userId! },
+  enabled: !!userId,
+})
+// If userId exists and entity is in store: returns initial data
+// If userId is falsy: returns QueryDisabledError as usual
+```
+
+## Placeholder Data
+
+Use `placeholderData` to show transient data while a query fetches for the first time. Unlike `initialData`, placeholder data is **never stored in the cache** — it's display-only and disappears once real data arrives.
+
+```typescript
+const getUser = api.query({
+  key: '/users/:id',
+  fn: ({ params }) => fetchJson<User>(`/api/users/${params.id}`),
+  placeholderData: (ctx) => ctx.getEntity('user', ctx.params.id) as User | undefined,
+})
+```
+
+When placeholder data is active, the query state reflects:
+
+```typescript
+getUser.subscribe((state) => {
+  state.data             // placeholder data (User from entity store)
+  state.status           // 'success' — so UI renders the data
+  state.isFetching       // true — fetch is still in progress
+  state.isPlaceholderData // true — this is placeholder, not real data
+}, { params: { id: '1' } })
+```
+
+This lets UI components render data immediately while showing a subtle loading indicator (e.g., a spinner overlay or skeleton shimmer), rather than a full loading state.
+
+Once the fetch completes, subscribers receive the real data with `isPlaceholderData: false`.
+
+### `initialData` vs `placeholderData`
+
+| | `initialData` | `placeholderData` |
+|---|---|---|
+| Stored in cache | Yes | No |
+| Populates entity store | Yes (if `entities` configured) | No |
+| Subject to `staleTime` | Yes | No |
+| `isPlaceholderData` | `false` | `true` |
+| Use case | SSR hydration, list-to-detail with confidence | Preview while fetching |
+
+Use `initialData` when you're confident the data is correct and recent enough. Use `placeholderData` when you want to show *something* while the real fetch happens.
 
 ## Lifecycle Callbacks
 

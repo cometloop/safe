@@ -84,6 +84,7 @@ export type QueryState<TData, TError> = {
   isFetching: boolean
   isStale: boolean
   dataUpdatedAt: number | null
+  isPlaceholderData: boolean
 }
 
 // ─── Cache Entry ───
@@ -158,6 +159,12 @@ export type QueryFnContext<TPath extends string> = {
   signal?: AbortSignal
 } & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : unknown)
 
+export type DataFnContext<TPath extends string> = {
+  getEntity: (type: string, id: string) => unknown | undefined
+} & ([HasPathParams<TPath>] extends [true]
+  ? { params: PathParams<TPath>; searchParams?: SearchParams }
+  : { searchParams?: SearchParams })
+
 export type MutationFnContext<TPath extends string, TBody> = {
   searchParams?: SearchParams
   signal?: AbortSignal
@@ -185,6 +192,9 @@ export type QueryConfig<TData, TPath extends string = string, TParsed = TData, T
   refetchInterval?: number | false
   refetchIntervalInBackground?: boolean
   refetchOnWindowFocus?: boolean
+  initialData?: TMapped | ((context: DataFnContext<TPath>) => TMapped | undefined)
+  initialDataUpdatedAt?: number | (() => number | undefined)
+  placeholderData?: TMapped | ((context: DataFnContext<TPath>) => TMapped | undefined)
 } & LifecycleCallbacks<TMapped>
   & ([TMapped] extends [TParsed]
     ? [TParsed] extends [TMapped]

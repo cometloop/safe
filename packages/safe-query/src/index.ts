@@ -18,6 +18,7 @@ export type {
   QueryCallable,
   MutationCallable,
   QueryFnContext,
+  DataFnContext,
   MutationFnContext,
   QueryInvokeOptions,
   MutationInvokeOptions,

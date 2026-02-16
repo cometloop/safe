@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext, LifecycleCallbacks } from './types'
+import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext, DataFnContext, LifecycleCallbacks } from './types'
 import { QueryDisabledError } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
@@ -48,6 +48,10 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
   const configOnError = config.onError
   const configOnSettled = config.onSettled
 
+  const initialData = config.initialData
+  const initialDataUpdatedAt = config.initialDataUpdatedAt
+  const placeholderData = config.placeholderData
+
   const refetchInterval = config.refetchInterval ?? defaultRefetchInterval
   const refetchIntervalInBackground = config.refetchIntervalInBackground ?? defaultRefetchIntervalInBackground
   const refetchOnWindowFocus = config.refetchOnWindowFocus ?? defaultRefetchOnWindowFocus
@@ -75,7 +79,59 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     }
   }
 
-  function getState(key: string): QueryState<TMapped, E> {
+  function buildDataFnContext(params?: Record<string, string>, searchParams?: SearchParams): DataFnContext<TPath> {
+    const ctx: Record<string, unknown> = {
+      getEntity: (type: string, id: string) => entityStore.get(type, id),
+    }
+    if (params) ctx.params = params
+    if (searchParams) ctx.searchParams = searchParams
+    return ctx as DataFnContext<TPath>
+  }
+
+  function resolveDataOption(
+    option: TMapped | ((context: DataFnContext<TPath>) => TMapped | undefined) | undefined,
+    params?: Record<string, string>,
+    searchParams?: SearchParams,
+  ): TMapped | undefined {
+    if (option === undefined) return undefined
+    if (typeof option === 'function') {
+      return (option as (ctx: DataFnContext<TPath>) => TMapped | undefined)(
+        buildDataFnContext(params, searchParams),
+      )
+    }
+    return option
+  }
+
+  function seedInitialData(key: string, params?: Record<string, string>, searchParams?: SearchParams): void {
+    const entry = queryCache.get(key)
+    if (!entry || entry.data !== undefined || entry.dataUpdatedAt !== null || initialData === undefined) return
+
+    const resolved = resolveDataOption(initialData, params, searchParams)
+    if (resolved === undefined) return
+
+    if (entities) {
+      const { normalized, entityKeys } = entityStore.normalize(
+        resolved,
+        entities as Record<string, (entity: any) => string>,
+      )
+      queryCache.setData(key, resolved, normalized, entityKeys)
+      entityStore.registerQueryEntities(key, entityKeys)
+    } else {
+      queryCache.setData(key, resolved, undefined, new Set())
+    }
+
+    // Override dataUpdatedAt if initialDataUpdatedAt is provided
+    if (initialDataUpdatedAt !== undefined) {
+      const updatedAt = typeof initialDataUpdatedAt === 'function'
+        ? initialDataUpdatedAt()
+        : initialDataUpdatedAt
+      if (updatedAt !== undefined) {
+        entry.dataUpdatedAt = updatedAt
+      }
+    }
+  }
+
+  function getState(key: string, params?: Record<string, string>, searchParams?: SearchParams): QueryState<TMapped, E> {
     const entry = queryCache.get(key)
     if (!entry) {
       return {
@@ -85,6 +141,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
         isFetching: false,
         isStale: true,
         dataUpdatedAt: null,
+        isPlaceholderData: false,
       }
     }
 
@@ -109,25 +166,41 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
             ? 'loading'
             : 'idle'
 
+    // Placeholder injection: only when no real data and fetch in progress
+    let isPlaceholderData = false
+    if (data === undefined && entry.inflightPromise !== null && placeholderData !== undefined) {
+      const resolved = resolveDataOption(placeholderData, params, searchParams)
+      if (resolved !== undefined) {
+        data = resolved
+        isPlaceholderData = true
+      }
+    }
+
     return {
       data,
       error: entry.error as E | null,
-      status,
+      status: isPlaceholderData ? 'success' : status,
       isFetching: entry.inflightPromise !== null,
       isStale,
       dataUpdatedAt: entry.dataUpdatedAt,
+      isPlaceholderData,
     }
   }
 
   function invoke(options?: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean } & LifecycleCallbacks<TMapped, E>): Promise<SafeResult<TMapped, E>> {
-    // Skip fetch when disabled
+    const params = options?.params
+    const searchParams = options?.searchParams
+    const key = queryCache.buildKey(path, params, searchParams)
+
+    // Ensure cache entry exists and seed initial data
+    queryCache.getOrCreate(key, staleTime, gcTime)
+    seedInitialData(key, params, searchParams)
+
+    // Skip fetch when disabled (now sees initialData in cache)
     if (options?.enabled === false) {
-      const params = options?.params
-      const searchParams = options?.searchParams
-      const key = queryCache.buildKey(path, params, searchParams)
       const entry = queryCache.get(key)
       if (entry?.data !== undefined) {
-        const state = getState(key)
+        const state = getState(key, params, searchParams)
         return Promise.resolve([state.data!, null] as unknown as SafeResult<TMapped, E>)
       }
       return safeInstance.async<TMapped>(() => { throw new QueryDisabledError() })
@@ -137,14 +210,11 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     const invokeOnError = options?.onError
     const invokeOnSettled = options?.onSettled
 
-    const params = options?.params
-    const searchParams = options?.searchParams
-    const key = queryCache.buildKey(path, params, searchParams)
     const entry = queryCache.getOrCreate(key, staleTime, gcTime)
 
     // Return cached data if fresh
     if (!queryCache.isStale(entry) && entry.data !== undefined) {
-      const state = getState(key)
+      const state = getState(key, params, searchParams)
       return Promise.resolve([state.data!, null] as unknown as SafeResult<TMapped, E>)
     }
 
@@ -209,7 +279,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
           entry.abortController = null
           notifier.notify(key)
 
-          const state = getState(key)
+          const state = getState(key, params, searchParams)
           configOnSettled?.(state.data, state.error)
           invokeOnSettled?.(state.data, state.error)
         },
@@ -277,6 +347,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
 
     const key = queryCache.buildKey(path, params, searchParams)
     queryCache.getOrCreate(key, staleTime, gcTime)
+    seedInitialData(key, params, searchParams)
     queryCache.addSubscriber(key)
 
     const entry = queryCache.get(key)!
@@ -286,11 +357,11 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     }
 
     const unsub = notifier.subscribe(key, () => {
-      callback(getState(key))
+      callback(getState(key, params, searchParams))
     })
 
     // Initial notification
-    callback(getState(key))
+    callback(getState(key, params, searchParams))
 
     return () => {
       unsub()

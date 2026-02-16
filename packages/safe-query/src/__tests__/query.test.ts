@@ -758,4 +758,353 @@ describe('createQuery', () => {
 
     unsub()
   })
+
+  // ─── initialData ───
+
+  it('static initialData populates cache — invoke returns it without calling fn', async () => {
+    const fn = vi.fn().mockResolvedValue([{ id: '1' }])
+    const deps = createDeps({ defaultStaleTime: 60000 })
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+      initialData: [{ id: '1', name: 'Alice' }],
+      initialDataUpdatedAt: Date.now(),
+    }, deps)
+
+    const [result, err] = await query()
+    expect(err).toBeNull()
+    expect(result).toEqual([{ id: '1', name: 'Alice' }])
+    expect(fn).not.toHaveBeenCalled()
+  })
+
+  it('function initialData receives context with params and getEntity', async () => {
+    const fn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice' })
+    const deps = createDeps({ defaultStaleTime: 60000 })
+
+    // Pre-populate entity store
+    deps.entityStore.set('user', '1', { id: '1', name: 'Alice', __type: 'user' })
+
+    const initialDataFn = vi.fn().mockImplementation((ctx: any) => {
+      return ctx.getEntity('user', ctx.params.id)
+    })
+
+    const query = createQuery({
+      key: '/users/:id',
+      fn,
+      staleTime: 60000,
+      initialData: initialDataFn,
+      initialDataUpdatedAt: Date.now(),
+    }, deps)
+
+    const [result, err] = await query({ params: { id: '1' } })
+    expect(err).toBeNull()
+    expect(result).toEqual({ id: '1', name: 'Alice', __type: 'user' })
+    expect(initialDataFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { id: '1' },
+        getEntity: expect.any(Function),
+      })
+    )
+    expect(fn).not.toHaveBeenCalled()
+  })
+
+  it('initialDataUpdatedAt older than staleTime triggers background refetch', async () => {
+    const fn = vi.fn().mockResolvedValue([{ id: '1', name: 'Updated Alice' }])
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+      initialData: [{ id: '1', name: 'Alice' }],
+      initialDataUpdatedAt: Date.now() - 120000, // 2 minutes ago, stale
+    }, deps)
+
+    const [result] = await query()
+    // fn should have been called because the initial data is stale
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(result).toEqual([{ id: '1', name: 'Updated Alice' }])
+  })
+
+  it('initialDataUpdatedAt = now + long staleTime → no fetch', async () => {
+    const fn = vi.fn().mockResolvedValue([{ id: '1', name: 'Server' }])
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+      initialData: [{ id: '1', name: 'Cached' }],
+      initialDataUpdatedAt: Date.now(),
+    }, deps)
+
+    const [result] = await query()
+    expect(fn).not.toHaveBeenCalled()
+    expect(result).toEqual([{ id: '1', name: 'Cached' }])
+  })
+
+  it('initialData not used when cache already has data', async () => {
+    const fn = vi.fn().mockResolvedValue([{ id: '1', name: 'Server' }])
+    const deps = createDeps({ defaultStaleTime: 60000 })
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+      initialData: [{ id: '1', name: 'Initial' }],
+      initialDataUpdatedAt: Date.now(),
+    }, deps)
+
+    // First invoke seeds initial data
+    await query()
+    expect(fn).not.toHaveBeenCalled()
+
+    // Invalidate to make stale, then re-invoke
+    query.invalidate()
+    const [result] = await query()
+    // Should have called fn since cache was invalidated (data existed but was stale)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(result).toEqual([{ id: '1', name: 'Server' }])
+  })
+
+  it('initialData works with entity normalization — entity store populated', async () => {
+    const fn = vi.fn().mockResolvedValue([])
+    const deps = createDeps({ defaultStaleTime: 60000 })
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+      initialData: [
+        { id: '1', name: 'Alice', __type: 'user' },
+        { id: '2', name: 'Bob', __type: 'user' },
+      ],
+      initialDataUpdatedAt: Date.now(),
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    await query()
+
+    expect(fn).not.toHaveBeenCalled()
+    expect(deps.entityStore.get('user', '1')).toEqual(
+      expect.objectContaining({ id: '1', name: 'Alice', __type: 'user' })
+    )
+    expect(deps.entityStore.get('user', '2')).toEqual(
+      expect.objectContaining({ id: '2', name: 'Bob', __type: 'user' })
+    )
+  })
+
+  it('initialData seeded on subscribe — first callback receives data', async () => {
+    const deps = createDeps({ defaultStaleTime: 60000 })
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([]),
+      staleTime: 60000,
+      initialData: [{ id: '1', name: 'Alice' }],
+      initialDataUpdatedAt: Date.now(),
+    }, deps)
+
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    })
+
+    expect(states[0].status).toBe('success')
+    expect(states[0].data).toEqual([{ id: '1', name: 'Alice' }])
+    expect(states[0].isPlaceholderData).toBe(false)
+
+    unsub()
+  })
+
+  it('function initialData returning undefined → skips seeding, normal fetch proceeds', async () => {
+    const fn = vi.fn().mockResolvedValue([{ id: '1', name: 'Server' }])
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn,
+      initialData: () => undefined,
+    }, deps)
+
+    const [result] = await query()
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(result).toEqual([{ id: '1', name: 'Server' }])
+  })
+
+  it('initialData works with enabled: false — returns initial data instead of QueryDisabledError', async () => {
+    const fn = vi.fn().mockResolvedValue([])
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn,
+      initialData: [{ id: '1', name: 'Alice' }],
+      initialDataUpdatedAt: Date.now(),
+    }, deps)
+
+    const [result, err] = await query({ enabled: false })
+    expect(err).toBeNull()
+    expect(result).toEqual([{ id: '1', name: 'Alice' }])
+    expect(fn).not.toHaveBeenCalled()
+  })
+
+  // ─── placeholderData ───
+
+  it('placeholderData appears in subscriber state while fetching', async () => {
+    let resolvePromise: (value: any) => void
+    const fetchPromise = new Promise((resolve) => { resolvePromise = resolve })
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => fetchPromise as Promise<any>,
+      placeholderData: [{ id: '1', name: 'Placeholder' }],
+    }, deps)
+
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    })
+
+    // Start fetch
+    const executePromise = query()
+
+    // Find the loading state — should have placeholder
+    const loadingState = states.find(s => s.isFetching && s.isPlaceholderData)
+    expect(loadingState).toBeDefined()
+    expect(loadingState.data).toEqual([{ id: '1', name: 'Placeholder' }])
+    expect(loadingState.status).toBe('success')
+    expect(loadingState.isFetching).toBe(true)
+    expect(loadingState.isPlaceholderData).toBe(true)
+
+    resolvePromise!([{ id: '1', name: 'Real' }])
+    await executePromise
+
+    unsub()
+  })
+
+  it('placeholderData disappears when fetch completes — replaced by real data', async () => {
+    let resolvePromise: (value: any) => void
+    const fetchPromise = new Promise((resolve) => { resolvePromise = resolve })
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => fetchPromise as Promise<any>,
+      placeholderData: [{ id: '1', name: 'Placeholder' }],
+    }, deps)
+
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    })
+
+    const executePromise = query()
+    resolvePromise!([{ id: '1', name: 'Real' }])
+    await executePromise
+
+    const lastState = states[states.length - 1]
+    expect(lastState.data).toEqual([{ id: '1', name: 'Real' }])
+    expect(lastState.isPlaceholderData).toBe(false)
+    expect(lastState.status).toBe('success')
+    expect(lastState.isFetching).toBe(false)
+
+    unsub()
+  })
+
+  it('placeholderData not stored in cache', async () => {
+    let resolvePromise: (value: any) => void
+    const fetchPromise = new Promise((resolve) => { resolvePromise = resolve })
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => fetchPromise as Promise<any>,
+      placeholderData: [{ id: '1', name: 'Placeholder' }],
+    }, deps)
+
+    query()
+
+    // Cache entry should have no data
+    const entry = deps.queryCache.get('/users')
+    expect(entry?.data).toBeUndefined()
+
+    resolvePromise!([{ id: '1', name: 'Real' }])
+  })
+
+  it('placeholderData function form receives context with getEntity', async () => {
+    let resolvePromise: (value: any) => void
+    const fetchPromise = new Promise((resolve) => { resolvePromise = resolve })
+
+    const deps = createDeps()
+    deps.entityStore.set('user', '1', { id: '1', name: 'From Store', __type: 'user' })
+
+    const placeholderFn = vi.fn().mockImplementation((ctx: any) => {
+      return ctx.getEntity('user', '1')
+    })
+
+    const query = createQuery({
+      key: '/users/:id',
+      fn: () => fetchPromise as Promise<any>,
+      placeholderData: placeholderFn,
+    }, deps)
+
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    }, { params: { id: '1' } })
+
+    query({ params: { id: '1' } })
+
+    const placeholderState = states.find(s => s.isPlaceholderData)
+    expect(placeholderState).toBeDefined()
+    expect(placeholderState.data).toEqual({ id: '1', name: 'From Store', __type: 'user' })
+    expect(placeholderFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { id: '1' },
+        getEntity: expect.any(Function),
+      })
+    )
+
+    resolvePromise!({ id: '1', name: 'Real' })
+    unsub()
+  })
+
+  it('placeholderData not used when cache has data', async () => {
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1', name: 'Real' }]),
+      placeholderData: [{ id: '1', name: 'Placeholder' }],
+    }, deps)
+
+    await query()
+
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    })
+
+    // With data in cache, placeholder should never appear
+    expect(states[0].data).toEqual([{ id: '1', name: 'Real' }])
+    expect(states[0].isPlaceholderData).toBe(false)
+
+    unsub()
+  })
+
+  it('isPlaceholderData is false in all non-placeholder scenarios', async () => {
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1' }]),
+    }, deps)
+
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    })
+
+    await query()
+
+    for (const state of states) {
+      expect(state.isPlaceholderData).toBe(false)
+    }
+
+    unsub()
+  })
 })
