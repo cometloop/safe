@@ -78,19 +78,11 @@ export function createMutation<TData, E, TPath extends string>(
 
     if (hasParams) {
       params = args[0]
-      if (method === 'DELETE') {
-        options = args[1]
-      } else {
-        body = args[1]
-        options = args[2]
-      }
+      body = args[1]
+      options = args[2]
     } else {
-      if (method === 'DELETE') {
-        options = args[0]
-      } else {
-        body = args[0]
-        options = args[1]
-      }
+      body = args[0]
+      options = args[1]
     }
 
     const url = buildUrl(baseUrl, path, params)

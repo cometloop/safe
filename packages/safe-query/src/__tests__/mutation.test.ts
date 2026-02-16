@@ -95,7 +95,7 @@ describe('createMutation', () => {
     const deps = createDeps()
     const mutation = createMutation('/users/:id', { method: 'DELETE' }, deps)
 
-    const [_result, err] = await mutation.execute({ id: '123' })
+    const [_result, err] = await mutation.execute({ id: '123' }, undefined)
     expect(err).toBeNull()
     expect(fetch).toHaveBeenCalledWith(
       'https://api.example.com/users/123',
@@ -261,7 +261,7 @@ describe('createMutation', () => {
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    const executePromise = mutation.execute({ id: '1' })
+    const executePromise = mutation.execute({ id: '1' }, undefined)
 
     // Entity should be deleted optimistically
     expect(deps.entityStore.get('user', '1')).toBeUndefined()
@@ -450,7 +450,7 @@ describe('createMutation', () => {
     const deps = createDeps()
     const mutation = createMutation('/cache', { method: 'DELETE' }, deps)
 
-    const [, err] = await mutation.execute()
+    const [, err] = await mutation.execute(undefined)
     expect(err).toBeNull()
     expect(fetch).toHaveBeenCalledWith(
       'https://api.example.com/cache',
@@ -529,7 +529,7 @@ describe('createMutation', () => {
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    const [, err] = await mutation.execute({ id: '1' })
+    const [, err] = await mutation.execute({ id: '1' }, undefined)
     expect(err).toBe('Server error')
 
     // Should be rolled back

@@ -19,17 +19,23 @@ export type SafeQueryClient<E> = {
   ) => QueryObject<TParsed extends TData ? TData : TParsed, E, TPath>
   mutate: <
     TData = void,
+    TBody = unknown,
     TPath extends string = string,
-    TMethod extends string = string,
+    TMethod extends 'POST' | 'PUT' | 'PATCH' | 'DELETE' =
+      | 'POST'
+      | 'PUT'
+      | 'PATCH'
+      | 'DELETE',
     TParsed = TData,
   >(
     path: TPath,
-    config: MutationConfig<TData, TPath, TParsed>
+    config: MutationConfig<TData, TPath, TMethod, TParsed>
   ) => MutationObject<
     TParsed extends TData ? TData : TParsed,
     E,
     TPath,
-    TMethod
+    TMethod,
+    TBody
   >
 }
 
@@ -76,12 +82,17 @@ export function createSafeQueryClient<E>(
 
     mutate: <
       TData = void,
+      _TBody = unknown,
       TPath extends string = string,
-      _TMethod extends string = string,
+      TMethod extends 'POST' | 'PUT' | 'PATCH' | 'DELETE' =
+        | 'POST'
+        | 'PUT'
+        | 'PATCH'
+        | 'DELETE',
       TParsed = TData,
     >(
       path: TPath,
-      mutationConfig: MutationConfig<TData, TPath, TParsed>
+      mutationConfig: MutationConfig<TData, TPath, TMethod, TParsed>
     ) => {
       return createMutation(path, mutationConfig as any, {
         safeInstance,

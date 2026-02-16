@@ -158,8 +158,17 @@ export type OptimisticConfig<TPath extends string> = {
   ) => string
 }
 
-export type MutationConfig<TData, TPath extends string, TParsed = TData> = {
-  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export type MutationConfig<
+  TData,
+  TPath extends string,
+  TMethod extends 'POST' | 'PUT' | 'PATCH' | 'DELETE' =
+    | 'POST'
+    | 'PUT'
+    | 'PATCH'
+    | 'DELETE',
+  TParsed = TData,
+> = {
+  method: TMethod
   parseResponse?: (data: TData) => TParsed
   entities?: EntityExtractors<TParsed>
   optimistic?: OptimisticConfig<TPath>
@@ -197,39 +206,27 @@ export type QueryObject<TData, TError, TPath extends string> =
 
 // ─── Mutation Object ───
 
-type MutationExecuteWithParamsAndBody<TData, TError, TPath extends string> = (
-  params: PathParams<TPath>,
-  body: unknown,
-  options?: { signal?: AbortSignal }
-) => Promise<SafeResult<TData, TError>>
-
-type MutationExecuteWithParamsOnly<TData, TError, TPath extends string> = (
-  params: PathParams<TPath>,
-  options?: { signal?: AbortSignal }
-) => Promise<SafeResult<TData, TError>>
-
-type MutationExecuteWithBodyOnly<TData, TError> = (
-  body: unknown,
-  options?: { signal?: AbortSignal }
-) => Promise<SafeResult<TData, TError>>
-
 export type MutationObject<
   TData,
   TError,
   TPath extends string,
-  TMethod extends string,
+  _TMethod extends string = string,
+  TBody = unknown,
 > =
   [HasPathParams<TPath>] extends [true]
-    ? TMethod extends 'DELETE'
-      ? { execute: MutationExecuteWithParamsOnly<TData, TError, TPath> }
-      : { execute: MutationExecuteWithParamsAndBody<TData, TError, TPath> }
-    : TMethod extends 'DELETE'
-      ? {
-          execute: (options?: {
-            signal?: AbortSignal
-          }) => Promise<SafeResult<TData, TError>>
-        }
-      : { execute: MutationExecuteWithBodyOnly<TData, TError> }
+    ? {
+        execute: (
+          params: PathParams<TPath>,
+          body: TBody,
+          options?: { signal?: AbortSignal }
+        ) => Promise<SafeResult<TData, TError>>
+      }
+    : {
+        execute: (
+          body: TBody,
+          options?: { signal?: AbortSignal }
+        ) => Promise<SafeResult<TData, TError>>
+      }
 
 // ─── Subscriber callback ───
 

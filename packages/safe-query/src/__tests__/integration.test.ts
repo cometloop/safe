@@ -350,7 +350,7 @@ describe('Integration', () => {
     })
 
     const clearAll = api.mutate('/cache', { method: 'DELETE' })
-    const [, err] = await clearAll.execute()
+    const [, err] = await clearAll.execute(undefined)
     expect(err).toBeNull()
   })
 })
