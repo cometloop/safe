@@ -16,8 +16,6 @@ function createDeps(overrides: Record<string, any> = {}) {
     queryCache: new QueryCache(),
     entityStore: new EntityStore(),
     notifier: new Notifier(),
-    baseUrl: 'https://api.example.com',
-    headers: undefined,
     defaultStaleTime: 0,
     defaultGcTime: 5 * 60_000,
     ...overrides,
@@ -36,20 +34,13 @@ describe('createQuery', () => {
       { id: '2', name: 'Bob' },
     ]
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(users),
-      })
-    )
-
     const deps = createDeps()
-    const query = createQuery('/users', undefined, deps)
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve(users),
+    }, deps)
 
-    const [result, err] = await query.execute()
+    const [result, err] = await query()
     expect(err).toBeNull()
     expect(result).toEqual(users)
   })
@@ -57,48 +48,33 @@ describe('createQuery', () => {
   it('executes a query with path params', async () => {
     const user = { id: '123', name: 'Alice' }
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(user),
-      })
-    )
-
     const deps = createDeps()
-    const query = createQuery('/users/:id', undefined, deps)
+    const fn = vi.fn().mockResolvedValue(user)
+    const query = createQuery({
+      key: '/users/:id',
+      fn,
+    }, deps)
 
-    const [result, err] = await query.execute({ id: '123' })
+    const [result, err] = await query({ params: { id: '123' } })
     expect(err).toBeNull()
     expect(result).toEqual(user)
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users/123',
-      expect.any(Object)
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({ params: { id: '123' } })
     )
   })
 
   it('applies parseResponse', async () => {
     const rawData = [{ id: '1', name: 'Alice' }]
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(rawData),
-      })
-    )
-
     const deps = createDeps()
-    const query = createQuery('/users', {
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve(rawData),
       parseResponse: (data: any[]) =>
         data.map((u) => ({ ...u, __type: 'user' as const })),
     }, deps)
 
-    const [result, err] = await query.execute()
+    const [result, err] = await query()
     expect(err).toBeNull()
     expect(result).toEqual([{ id: '1', name: 'Alice', __type: 'user' }])
   })
@@ -109,22 +85,14 @@ describe('createQuery', () => {
       { id: '2', name: 'Bob', __type: 'user' },
     ]
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(users),
-      })
-    )
-
     const deps = createDeps()
-    const query = createQuery('/users', {
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve(users),
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    await query.execute()
+    await query()
 
     // Entities should be in the store
     expect(deps.entityStore.get('user', '1')).toEqual({
@@ -141,28 +109,23 @@ describe('createQuery', () => {
 
   it('returns cached data when fresh', async () => {
     const users = [{ id: '1', name: 'Alice' }]
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(users),
-      })
-    )
+    const fn = vi.fn().mockResolvedValue(users)
 
     const deps = createDeps({ defaultStaleTime: 60000 })
-    const query = createQuery('/users', { staleTime: 60000 }, deps)
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+    }, deps)
 
-    await query.execute()
-    expect(fetch).toHaveBeenCalledTimes(1)
+    await query()
+    expect(fn).toHaveBeenCalledTimes(1)
 
     // Second call should return cached data
-    const [result, err] = await query.execute()
+    const [result, err] = await query()
     expect(err).toBeNull()
     expect(result).toEqual(users)
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 
   it('deduplicates concurrent requests', async () => {
@@ -171,23 +134,16 @@ describe('createQuery', () => {
       resolvePromise = resolve
     })
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(
-        fetchPromise.then((data) => ({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve(data),
-        }))
-      )
-    )
+    const fn = vi.fn().mockReturnValue(fetchPromise)
 
     const deps = createDeps()
-    const query = createQuery('/users', undefined, deps)
+    const query = createQuery({
+      key: '/users',
+      fn,
+    }, deps)
 
-    const p1 = query.execute()
-    const p2 = query.execute()
+    const p1 = query()
+    const p2 = query()
 
     resolvePromise!([{ id: '1' }])
 
@@ -196,24 +152,17 @@ describe('createQuery', () => {
 
     expect(r1).toEqual([{ id: '1' }])
     expect(r2).toEqual([{ id: '1' }])
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 
   it('subscribes and receives state updates', async () => {
     const users = [{ id: '1', name: 'Alice' }]
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(users),
-      })
-    )
-
     const deps = createDeps()
-    const query = createQuery('/users', undefined, deps)
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve(users),
+    }, deps)
 
     const states: any[] = []
     const unsub = query.subscribe((state: any) => {
@@ -224,7 +173,7 @@ describe('createQuery', () => {
     expect(states.length).toBe(1)
     expect(states[0].status).toBe('idle')
 
-    await query.execute()
+    await query()
 
     // Should have received updated states
     expect(states.length).toBeGreaterThan(1)
@@ -238,27 +187,20 @@ describe('createQuery', () => {
   it('subscribes with params', async () => {
     const user = { id: '123', name: 'Alice' }
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(user),
-      })
-    )
-
     const deps = createDeps()
-    const query = createQuery('/users/:id', undefined, deps)
+    const query = createQuery({
+      key: '/users/:id',
+      fn: () => Promise.resolve(user),
+    }, deps)
 
     const states: any[] = []
-    const unsub = query.subscribe({ id: '123' }, (state: any) => {
+    const unsub = query.subscribe((state: any) => {
       states.push({ ...state })
-    })
+    }, { params: { id: '123' } })
 
     expect(states[0].status).toBe('idle')
 
-    await query.execute({ id: '123' })
+    await query({ params: { id: '123' } })
 
     const lastState = states[states.length - 1]
     expect(lastState.data).toEqual(user)
@@ -269,53 +211,43 @@ describe('createQuery', () => {
   it('invalidates cache', async () => {
     const users = [{ id: '1', name: 'Alice' }]
     let callCount = 0
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        callCount++
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve(users),
-        })
-      })
-    )
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return Promise.resolve(users)
+    })
 
     const deps = createDeps({ defaultStaleTime: 60000 })
-    const query = createQuery('/users', { staleTime: 60000 }, deps)
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+    }, deps)
 
-    await query.execute()
+    await query()
     expect(callCount).toBe(1)
 
     query.invalidate()
 
     // Next execute should refetch
-    await query.execute()
+    await query()
     expect(callCount).toBe(2)
   })
 
   it('refetches data', async () => {
     let callCount = 0
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        callCount++
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve([{ id: callCount }]),
-        })
-      })
-    )
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return Promise.resolve([{ id: callCount }])
+    })
 
     const deps = createDeps({ defaultStaleTime: 60000 })
-    const query = createQuery('/users', { staleTime: 60000 }, deps)
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+    }, deps)
 
-    await query.execute()
+    await query()
     expect(callCount).toBe(1)
 
     const [result] = await query.refetch()
@@ -324,122 +256,77 @@ describe('createQuery', () => {
   })
 
   it('handles fetch errors', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new Error('Network error'))
-    )
-
     const deps = createDeps()
-    const query = createQuery('/users', undefined, deps)
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.reject(new Error('Network error')),
+    }, deps)
 
-    const [result, err] = await query.execute()
+    const [result, err] = await query()
     expect(result).toBeNull()
     expect(err).toBe('Network error')
   })
 
-  it('provides headers from config', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve([]),
-      })
-    )
-
-    const deps = createDeps({
-      headers: () => ({ Authorization: 'Bearer token' }),
-    })
-    const query = createQuery('/users', undefined, deps)
-
-    await query.execute()
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer token',
-        }),
-      })
-    )
-  })
-
   it('executes a query with search params', async () => {
     const users = [{ id: '1', name: 'Alice' }]
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(users),
-      })
-    )
+    const fn = vi.fn().mockResolvedValue(users)
 
     const deps = createDeps()
-    const query = createQuery('/users', undefined, deps)
+    const query = createQuery({
+      key: '/users',
+      fn,
+    }, deps)
 
-    const [result, err] = await query.execute({
+    const [result, err] = await query({
       searchParams: { search: 'foo', page: 2 },
     })
     expect(err).toBeNull()
     expect(result).toEqual(users)
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users?page=2&search=foo',
-      expect.any(Object)
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({ searchParams: { search: 'foo', page: 2 } })
     )
   })
 
   it('executes a query with path params and search params', async () => {
     const posts = [{ id: 'p1', title: 'Hello' }]
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(posts),
-      })
-    )
+    const fn = vi.fn().mockResolvedValue(posts)
 
     const deps = createDeps()
-    const query = createQuery('/users/:id/posts', undefined, deps)
+    const query = createQuery({
+      key: '/users/:id/posts',
+      fn,
+    }, deps)
 
-    const [result, err] = await query.execute(
-      { id: '123' },
-      { searchParams: { page: 2 } }
-    )
+    const [result, err] = await query({
+      params: { id: '123' },
+      searchParams: { page: 2 },
+    })
     expect(err).toBeNull()
     expect(result).toEqual(posts)
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users/123/posts?page=2',
-      expect.any(Object)
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { id: '123' },
+        searchParams: { page: 2 },
+      })
     )
   })
 
   it('different search params produce different cache entries', async () => {
     let callCount = 0
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        callCount++
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve([{ page: callCount }]),
-        })
-      })
-    )
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return Promise.resolve([{ page: callCount }])
+    })
 
     const deps = createDeps({ defaultStaleTime: 60000 })
-    const query = createQuery('/users', { staleTime: 60000 }, deps)
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+    }, deps)
 
-    await query.execute({ searchParams: { page: 1 } })
-    await query.execute({ searchParams: { page: 2 } })
+    await query({ searchParams: { page: 1 } })
+    await query({ searchParams: { page: 2 } })
 
     // Both should have made separate fetch calls
     expect(callCount).toBe(2)
@@ -448,18 +335,11 @@ describe('createQuery', () => {
   it('subscribes with search params (no path params)', async () => {
     const users = [{ id: '1', name: 'Alice' }]
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(users),
-      })
-    )
-
     const deps = createDeps()
-    const query = createQuery('/users', undefined, deps)
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve(users),
+    }, deps)
 
     const states: any[] = []
     const unsub = query.subscribe(
@@ -469,7 +349,7 @@ describe('createQuery', () => {
 
     expect(states[0].status).toBe('idle')
 
-    await query.execute({ searchParams: { search: 'foo' } })
+    await query({ searchParams: { search: 'foo' } })
 
     const lastState = states[states.length - 1]
     expect(lastState.data).toEqual(users)
@@ -479,58 +359,68 @@ describe('createQuery', () => {
 
   it('invalidates with search params', async () => {
     let callCount = 0
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        callCount++
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve([{ id: callCount }]),
-        })
-      })
-    )
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return Promise.resolve([{ id: callCount }])
+    })
 
     const deps = createDeps({ defaultStaleTime: 60000 })
-    const query = createQuery('/users', { staleTime: 60000 }, deps)
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+    }, deps)
 
-    await query.execute({ searchParams: { page: 1 } })
+    await query({ searchParams: { page: 1 } })
     expect(callCount).toBe(1)
 
     query.invalidate({ searchParams: { page: 1 } })
 
-    await query.execute({ searchParams: { page: 1 } })
+    await query({ searchParams: { page: 1 } })
     expect(callCount).toBe(2)
   })
 
   it('refetches with search params', async () => {
     let callCount = 0
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        callCount++
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve([{ id: callCount }]),
-        })
-      })
-    )
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return Promise.resolve([{ id: callCount }])
+    })
 
     const deps = createDeps({ defaultStaleTime: 60000 })
-    const query = createQuery('/users', { staleTime: 60000 }, deps)
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+    }, deps)
 
-    await query.execute({ searchParams: { page: 1 } })
+    await query({ searchParams: { page: 1 } })
     expect(callCount).toBe(1)
 
-    const [result] = await query.refetch(undefined, {
+    const [result] = await query.refetch({
       searchParams: { page: 1 },
     })
     expect(callCount).toBe(2)
     expect(result).toEqual([{ id: 2 }])
+  })
+
+  it('exposes reactive status getter', async () => {
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1' }]),
+    }, deps)
+
+    expect(query.status).toBe('idle')
+    expect(query.data).toBeUndefined()
+    expect(query.error).toBeNull()
+    expect(query.isFetching).toBe(false)
+    expect(query.isStale).toBe(true)
+
+    await query()
+
+    expect(query.status).toBe('success')
+    expect(query.data).toEqual([{ id: '1' }])
+    expect(query.isFetching).toBe(false)
   })
 })

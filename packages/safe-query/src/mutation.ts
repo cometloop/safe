@@ -1,33 +1,26 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { MutationConfig, SearchParams } from './types'
+import type { MutationConfig, MutationCallable, SearchParams } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
-import { fetchJson } from './fetch-client'
-import { buildUrl } from './url'
 
 export type MutationDeps<E> = {
-  safeInstance: SafeInstance<E>
+  safeInstance: SafeInstance<E, any>
   queryCache: QueryCache
   entityStore: EntityStore
   notifier: Notifier
-  baseUrl: string
-  headers?: () => Record<string, string>
   enableOptimisticUpdates: boolean
 }
 
-export function createMutation<TData, E, TPath extends string>(
-  path: TPath,
-  config: MutationConfig<TData, TPath>,
+export function createMutation<TData, TBody = void, E = unknown, TPath extends string = string>(
+  config: MutationConfig<TData, TBody, TPath>,
   deps: MutationDeps<E>
-) {
+): MutationCallable<TData, E, TPath, TBody> {
   const {
     safeInstance,
     queryCache,
     entityStore,
     notifier,
-    baseUrl,
-    headers,
     enableOptimisticUpdates,
   } = deps
 
@@ -67,25 +60,9 @@ export function createMutation<TData, E, TPath extends string>(
     return { entityType, entityId }
   }
 
-  function execute(...args: any[]): Promise<SafeResult<TData, E>> {
-    // Parse arguments based on path params + method
-    let params: Record<string, string> | undefined
-    let body: unknown | undefined
-    let options: { signal?: AbortSignal; searchParams?: SearchParams } | undefined
-
-    // Determine if this path has params by checking for :param pattern
-    const hasParams = path.includes(':')
-
-    if (hasParams) {
-      params = args[0]
-      body = args[1]
-      options = args[2]
-    } else {
-      body = args[0]
-      options = args[1]
-    }
-
-    const url = buildUrl(baseUrl, path, params, options?.searchParams)
+  function invoke(options: any): Promise<SafeResult<TData, E>> {
+    const params = options?.params
+    const body = options?.body
     const opt = resolveOptimistic(params)
 
     // Optimistic update flow
@@ -115,14 +92,8 @@ export function createMutation<TData, E, TPath extends string>(
     }
 
     return safeInstance.async<TData, TData>(
-      (signal) => {
-        const mergedSignal = options?.signal ?? signal
-        return fetchJson<TData>(url, {
-          method,
-          headers: headers?.(),
-          body,
-          signal: mergedSignal,
-        })
+      () => {
+        return config.fn(options as any)
       },
       {
         parseResult: parseResponse as
@@ -170,5 +141,5 @@ export function createMutation<TData, E, TPath extends string>(
     )
   }
 
-  return { execute: execute as any }
+  return invoke as MutationCallable<TData, E, TPath, TBody>
 }

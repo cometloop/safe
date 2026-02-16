@@ -1,4 +1,4 @@
-export { createSafeQueryClient } from './client'
+export { safeQuery } from './client'
 export type { SafeQueryClient } from './client'
 export type {
   ExtractPathParams,
@@ -12,14 +12,17 @@ export type {
   CacheEntry,
   HttpError,
   FetchOptions,
-  CreateSafeQueryClientConfig,
+  SafeQueryConfig,
   QueryConfig,
   MutationConfig,
   OptimisticConfig,
-  QueryObject,
-  QueryExecuteOptions,
-  MutationObject,
-  MutationExecuteOptions,
+  QueryCallable,
+  MutationCallable,
+  QueryFnContext,
+  MutationFnContext,
+  QueryInvokeOptions,
+  MutationInvokeOptions,
+  KeyOptions,
   Subscriber,
   SearchParamValue,
   SearchParams,

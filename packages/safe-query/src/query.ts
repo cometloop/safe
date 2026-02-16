@@ -1,43 +1,40 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { QueryConfig, QueryState, SearchParams } from './types'
+import type { QueryConfig, QueryState, QueryCallable, SearchParams } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
-import { fetchJson } from './fetch-client'
-import { buildUrl } from './url'
 
 export type QueryDeps<E> = {
-  safeInstance: SafeInstance<E>
+  safeInstance: SafeInstance<E, any>
   queryCache: QueryCache
   entityStore: EntityStore
   notifier: Notifier
-  baseUrl: string
-  headers?: () => Record<string, string>
   defaultStaleTime: number
   defaultGcTime: number
 }
 
 export function createQuery<TData, E, TPath extends string>(
-  path: TPath,
-  config: QueryConfig<TData> | undefined,
+  config: QueryConfig<TData, TPath>,
   deps: QueryDeps<E>
-) {
+): QueryCallable<TData, E, TPath> {
   const {
     safeInstance,
     queryCache,
     entityStore,
     notifier,
-    baseUrl,
-    headers,
     defaultStaleTime,
     defaultGcTime,
   } = deps
 
-  const staleTime = config?.staleTime ?? defaultStaleTime
-  const gcTime = config?.gcTime ?? defaultGcTime
-  const parseResponse = config?.parseResponse
-  const entities = config?.entities
-  const retry = config?.retry
+  const path = config.key
+  const fn = config.fn
+  const staleTime = config.staleTime ?? defaultStaleTime
+  const gcTime = config.gcTime ?? defaultGcTime
+  const parseResponse = config.parseResponse
+  const entities = config.entities
+  const retry = config.retry
+
+  let lastKey: string | undefined
 
   function getState(key: string): QueryState<TData, E> {
     const entry = queryCache.get(key)
@@ -79,29 +76,17 @@ export function createQuery<TData, E, TPath extends string>(
     }
   }
 
-  const hasPathParams = path.includes(':')
-
-  function executeInner(
-    ...args: any[]
-  ): Promise<SafeResult<TData, E>> {
-    let params: Record<string, string> | undefined
-    let options: { signal?: AbortSignal; searchParams?: SearchParams } | undefined
-
-    if (hasPathParams) {
-      params = args[0]
-      options = args[1]
-    } else {
-      options = args[0]
-    }
-
+  function invoke(options?: any): Promise<SafeResult<TData, E>> {
+    const params = options?.params
     const searchParams = options?.searchParams
     const key = queryCache.buildKey(path, params, searchParams)
+    lastKey = key
     const entry = queryCache.getOrCreate(key, staleTime, gcTime)
 
     // Return cached data if fresh
     if (!queryCache.isStale(entry) && entry.data !== undefined) {
       const state = getState(key)
-      return Promise.resolve([state.data!, null] as SafeResult<TData, E>)
+      return Promise.resolve([state.data!, null] as unknown as SafeResult<TData, E>)
     }
 
     // Deduplication: return inflight promise
@@ -110,7 +95,6 @@ export function createQuery<TData, E, TPath extends string>(
     }
 
     const generation = ++entry.generation
-    const url = buildUrl(baseUrl, path, params, searchParams)
 
     // Notify loading state
     entry.inflightPromise = {} as any // placeholder to indicate fetching
@@ -118,12 +102,9 @@ export function createQuery<TData, E, TPath extends string>(
 
     const promise = safeInstance.async<TData, TData>(
       (signal) => {
-        const mergedSignal = options?.signal ?? signal
-        return fetchJson<TData>(url, {
-          method: 'GET',
-          headers: headers?.(),
-          signal: mergedSignal,
-        })
+        const context: any = { ...options }
+        if (signal) context.signal = options?.signal ?? signal
+        return fn(context)
       },
       {
         parseResult: parseResponse as
@@ -163,30 +144,11 @@ export function createQuery<TData, E, TPath extends string>(
   }
 
   function subscribe(
-    paramsOrCallback:
-      | Record<string, string>
-      | ((state: QueryState<TData, E>) => void),
-    maybeCallbackOrOptions?:
-      | ((state: QueryState<TData, E>) => void)
-      | { searchParams?: SearchParams },
-    maybeOptions?: { searchParams?: SearchParams }
+    callback: (state: QueryState<TData, E>) => void,
+    options?: any,
   ): () => void {
-    let params: Record<string, string> | undefined
-    let callback: (state: QueryState<TData, E>) => void
-    let searchParams: SearchParams | undefined
-
-    if (typeof paramsOrCallback === 'function') {
-      callback = paramsOrCallback
-      searchParams = (
-        maybeCallbackOrOptions as { searchParams?: SearchParams } | undefined
-      )?.searchParams
-    } else {
-      params = paramsOrCallback
-      callback = maybeCallbackOrOptions as (
-        state: QueryState<TData, E>
-      ) => void
-      searchParams = maybeOptions?.searchParams
-    }
+    const params = options?.params
+    const searchParams = options?.searchParams
 
     const key = queryCache.buildKey(path, params, searchParams)
     queryCache.getOrCreate(key, staleTime, gcTime)
@@ -205,46 +167,50 @@ export function createQuery<TData, E, TPath extends string>(
     }
   }
 
-  function invalidate(...args: any[]): void {
-    let params: Record<string, string> | undefined
-    let options: { searchParams?: SearchParams } | undefined
+  function invalidate(options?: any): void {
+    const params = options?.params
+    const searchParams = options?.searchParams
 
-    if (hasPathParams) {
-      params = args[0]
-      options = args[1]
-    } else {
-      options = args[0]
-    }
-
-    const key = queryCache.buildKey(path, params, options?.searchParams)
+    const key = queryCache.buildKey(path, params, searchParams)
     queryCache.invalidate(key)
     notifier.notify(key)
   }
 
-  function refetch(...args: any[]): Promise<SafeResult<TData, E>> {
-    let params: Record<string, string> | undefined
-    let options: { searchParams?: SearchParams } | undefined
-
-    if (hasPathParams) {
-      params = args[0]
-      options = args[1]
-    } else {
-      options = args[0]
-    }
-
+  function refetch(options?: any): Promise<SafeResult<TData, E>> {
+    const params = options?.params
     const searchParams = options?.searchParams
+
     const key = queryCache.buildKey(path, params, searchParams)
     queryCache.invalidate(key)
-    if (hasPathParams) {
-      return executeInner(params, { searchParams })
-    }
-    return executeInner({ searchParams })
+    return invoke({ params, searchParams })
   }
 
-  return {
-    execute: executeInner as any,
-    subscribe: subscribe as any,
-    invalidate: invalidate as any,
-    refetch: refetch as any,
-  }
+  // Attach methods
+  invoke.subscribe = subscribe as any
+  invoke.invalidate = invalidate as any
+  invoke.refetch = refetch as any
+
+  // Attach reactive getters
+  Object.defineProperty(invoke, 'status', {
+    get() { return getState(lastKey ?? queryCache.buildKey(path)).status },
+    enumerable: true,
+  })
+  Object.defineProperty(invoke, 'data', {
+    get() { return getState(lastKey ?? queryCache.buildKey(path)).data },
+    enumerable: true,
+  })
+  Object.defineProperty(invoke, 'error', {
+    get() { return getState(lastKey ?? queryCache.buildKey(path)).error },
+    enumerable: true,
+  })
+  Object.defineProperty(invoke, 'isFetching', {
+    get() { return getState(lastKey ?? queryCache.buildKey(path)).isFetching },
+    enumerable: true,
+  })
+  Object.defineProperty(invoke, 'isStale', {
+    get() { return getState(lastKey ?? queryCache.buildKey(path)).isStale },
+    enumerable: true,
+  })
+
+  return invoke as QueryCallable<TData, E, TPath>
 }

@@ -1,4 +1,4 @@
-import type { SafeResult, RetryConfig } from '@cometloop/safe'
+import type { SafeInstance, SafeResult, RetryConfig } from '@cometloop/safe'
 
 // ─── Path Param Extraction ───
 
@@ -133,21 +133,31 @@ export type FetchOptions = {
 
 // ─── Client Config ───
 
-export type CreateSafeQueryClientConfig<E> = {
-  name: string
-  baseUrl: string
-  headers?: () => Record<string, string>
-  enableOptimisticUpdates?: boolean
-  parseError: (e: unknown) => E
-  defaultError: E
-  retry?: RetryConfig
+export type SafeQueryConfig<E> = {
+  safe: SafeInstance<E, any>
   staleTime?: number
   gcTime?: number
+  enableOptimisticUpdates?: boolean
 }
+
+// ─── Fn Context Types ───
+
+export type QueryFnContext<TPath extends string> = {
+  searchParams?: SearchParams
+  signal?: AbortSignal
+} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
+
+export type MutationFnContext<TPath extends string, TBody> = {
+  searchParams?: SearchParams
+  signal?: AbortSignal
+} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
+  & ([TBody] extends [void | undefined] ? {} : { body: TBody })
 
 // ─── Query Config ───
 
-export type QueryConfig<TData, TParsed = TData> = {
+export type QueryConfig<TData, TPath extends string = string, TParsed = TData> = {
+  key: TPath
+  fn: (context: QueryFnContext<TPath>) => Promise<TData>
   parseResponse?: (data: TData) => TParsed
   entities?: EntityExtractors<TParsed>
   staleTime?: number
@@ -166,7 +176,8 @@ export type OptimisticConfig<TPath extends string> = {
 
 export type MutationConfig<
   TData,
-  TPath extends string,
+  TBody = void,
+  TPath extends string = string,
   TMethod extends 'POST' | 'PUT' | 'PATCH' | 'DELETE' =
     | 'POST'
     | 'PUT'
@@ -174,83 +185,52 @@ export type MutationConfig<
     | 'DELETE',
   TParsed = TData,
 > = {
-  method: TMethod
+  key: TPath
+  fn: (context: MutationFnContext<TPath, TBody>) => Promise<TData>
+  method?: TMethod
   parseResponse?: (data: TData) => TParsed
   entities?: EntityExtractors<TParsed>
   optimistic?: OptimisticConfig<TPath>
   retry?: RetryConfig
 }
 
-// ─── Query Object ───
+// ─── Invoke Options ───
 
-export type QueryExecuteOptions = {
-  signal?: AbortSignal
-  searchParams?: SearchParams
+export type QueryInvokeOptions<TPath extends string> =
+  [HasPathParams<TPath>] extends [true]
+    ? { params: PathParams<TPath>; searchParams?: SearchParams; signal?: AbortSignal }
+    : { searchParams?: SearchParams; signal?: AbortSignal } | void
+
+export type MutationInvokeOptions<TPath extends string, TBody> =
+  { searchParams?: SearchParams; signal?: AbortSignal }
+  & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
+  & ([TBody] extends [void | undefined] ? { body?: unknown } : { body: TBody })
+
+export type KeyOptions<TPath extends string> =
+  [HasPathParams<TPath>] extends [true]
+    ? { params: PathParams<TPath>; searchParams?: SearchParams }
+    : { searchParams?: SearchParams } | void
+
+// ─── Callable Types ───
+
+export type QueryCallable<TData, TError, TPath extends string> = {
+  (options?: QueryInvokeOptions<TPath>): Promise<SafeResult<TData, TError>>
+  subscribe: (
+    callback: (state: QueryState<TData, TError>) => void,
+    options?: KeyOptions<TPath> extends void ? void : KeyOptions<TPath>
+  ) => () => void
+  invalidate: (options?: KeyOptions<TPath> extends void ? void : KeyOptions<TPath>) => void
+  refetch: (options?: KeyOptions<TPath> extends void ? void : KeyOptions<TPath>) => Promise<SafeResult<TData, TError>>
+  readonly status: QueryState<TData, TError>['status']
+  readonly data: TData | undefined
+  readonly error: TError | null
+  readonly isFetching: boolean
+  readonly isStale: boolean
 }
 
-export type QueryObject<TData, TError, TPath extends string> =
-  [HasPathParams<TPath>] extends [true]
-    ? {
-        execute: (
-          params: PathParams<TPath>,
-          options?: QueryExecuteOptions
-        ) => Promise<SafeResult<TData, TError>>
-        subscribe: (
-          params: PathParams<TPath>,
-          callback: (state: QueryState<TData, TError>) => void,
-          options?: { searchParams?: SearchParams }
-        ) => () => void
-        invalidate: (
-          params: PathParams<TPath>,
-          options?: { searchParams?: SearchParams }
-        ) => void
-        refetch: (
-          params: PathParams<TPath>,
-          options?: { searchParams?: SearchParams }
-        ) => Promise<SafeResult<TData, TError>>
-      }
-    : {
-        execute: (
-          options?: QueryExecuteOptions
-        ) => Promise<SafeResult<TData, TError>>
-        subscribe: (
-          callback: (state: QueryState<TData, TError>) => void,
-          options?: { searchParams?: SearchParams }
-        ) => () => void
-        invalidate: (options?: { searchParams?: SearchParams }) => void
-        refetch: (options?: {
-          searchParams?: SearchParams
-        }) => Promise<SafeResult<TData, TError>>
-      }
-
-// ─── Mutation Object ───
-
-export type MutationExecuteOptions = {
-  signal?: AbortSignal
-  searchParams?: SearchParams
+export type MutationCallable<TData, TError, TPath extends string, TBody> = {
+  (options: MutationInvokeOptions<TPath, TBody>): Promise<SafeResult<TData, TError>>
 }
-
-export type MutationObject<
-  TData,
-  TError,
-  TPath extends string,
-  _TMethod extends string = string,
-  TBody = unknown,
-> =
-  [HasPathParams<TPath>] extends [true]
-    ? {
-        execute: (
-          params: PathParams<TPath>,
-          body: TBody,
-          options?: MutationExecuteOptions
-        ) => Promise<SafeResult<TData, TError>>
-      }
-    : {
-        execute: (
-          body: TBody,
-          options?: MutationExecuteOptions
-        ) => Promise<SafeResult<TData, TError>>
-      }
 
 // ─── Subscriber callback ───
 

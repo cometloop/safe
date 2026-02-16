@@ -1,7 +1,23 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { createSafeQueryClient } from '../client'
+import { createSafe } from '@cometloop/safe'
+import { safeQuery } from '../client'
 
 type AppError = { code: string; message: string }
+
+function createApi(overrides: Record<string, any> = {}) {
+  const safe = createSafe<AppError>({
+    parseError: (e) => ({
+      code: 'UNKNOWN',
+      message: e instanceof Error ? e.message : String(e),
+    }),
+    defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+  })
+
+  return safeQuery<AppError>({
+    safe,
+    ...overrides,
+  })
+}
 
 describe('Integration', () => {
   afterEach(() => {
@@ -14,31 +30,15 @@ describe('Integration', () => {
       { id: '2', name: 'Bob', __type: 'user' },
     ]
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(users),
-      })
-    )
+    const api = createApi()
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
-    })
-
-    const usersQuery = api.query<(typeof users)[number][]>('/users', {
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve(users),
       entities: { user: (u: any) => u.id },
     })
 
-    const [result, err] = await usersQuery.execute()
+    const [result, err] = await usersQuery()
     expect(err).toBeNull()
     expect(result).toEqual(users)
   })
@@ -52,27 +52,11 @@ describe('Integration', () => {
       },
     ]
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve(rawPosts),
-      })
-    )
+    const api = createApi()
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
-    })
-
-    const postsQuery = api.query('/posts', {
+    const postsQuery = api.query({
+      key: '/posts',
+      fn: () => Promise.resolve(rawPosts),
       parseResponse: (data: any[]) =>
         data.map((post) => ({
           ...post,
@@ -88,7 +72,7 @@ describe('Integration', () => {
       },
     })
 
-    const [result, err] = await postsQuery.execute()
+    const [result, err] = await postsQuery()
     expect(err).toBeNull()
     expect(result).toBeDefined()
     expect(result![0].title).toBe('Hello')
@@ -97,64 +81,35 @@ describe('Integration', () => {
   })
 
   it('mutation updates entity store and notifies queries', async () => {
-    // Setup: fetch users first
     const users = [{ id: '1', name: 'Alice', __type: 'user' }]
 
-    let fetchCallCount = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        fetchCallCount++
-        if (fetchCallCount === 1) {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            headers: new Headers({ 'content-length': '100' }),
-            json: () => Promise.resolve(users),
-          })
-        }
-        // Mutation response
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () =>
-            Promise.resolve({
-              id: '1',
-              name: 'Alice Updated',
-              __type: 'user',
-            }),
-        })
-      })
-    )
+    const api = createApi()
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
-    })
-
-    const usersQuery = api.query('/users', {
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve(users),
       entities: { user: (u: any) => u.id },
     })
 
     // Execute query to populate cache
-    await usersQuery.execute()
+    await usersQuery()
 
-    const updateUser = api.mutate('/users/:id', {
+    const updateUser = api.mutate({
+      key: '/users/:id',
+      fn: () => Promise.resolve({
+        id: '1',
+        name: 'Alice Updated',
+        __type: 'user',
+      }),
       method: 'PUT',
       entities: { user: (u: any) => u.id },
     })
 
     // Execute mutation
-    const [result, err] = await updateUser.execute(
-      { id: '1' },
-      { name: 'Alice Updated' }
-    )
+    const [result, err] = await updateUser({
+      params: { id: '1' },
+      body: { name: 'Alice Updated' },
+    })
     expect(err).toBeNull()
     expect(result).toEqual({
       id: '1',
@@ -169,29 +124,12 @@ describe('Integration', () => {
       resolvePromise = resolve
     })
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(
-        fetchPromise.then((data) => ({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve(data),
-        }))
-      )
-    )
+    const api = createApi()
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => fetchPromise as Promise<any>,
     })
-
-    const usersQuery = api.query('/users')
 
     const states: any[] = []
     const unsub = usersQuery.subscribe((state: any) => {
@@ -203,7 +141,7 @@ describe('Integration', () => {
     expect(states[0].data).toBeUndefined()
 
     // Start fetch
-    const executePromise = usersQuery.execute()
+    const executePromise = usersQuery()
 
     // Resolve fetch
     resolvePromise!([{ id: '1', name: 'Alice' }])
@@ -219,45 +157,18 @@ describe('Integration', () => {
   })
 
   it('optimistic update flow with rollback', async () => {
-    // First request succeeds (initial query)
-    // Second request fails (mutation)
-    let fetchCallCount = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        fetchCallCount++
-        if (fetchCallCount === 1) {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            headers: new Headers({ 'content-length': '100' }),
-            json: () =>
-              Promise.resolve([
-                { id: '1', name: 'Alice', __type: 'user' },
-              ]),
-          })
-        }
-        return Promise.reject(new Error('Server error'))
-      })
-    )
+    const users = [{ id: '1', name: 'Alice', __type: 'user' }]
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
-      enableOptimisticUpdates: true,
-    })
+    const api = createApi({ enableOptimisticUpdates: true })
 
-    const usersQuery = api.query('/users', {
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve(users),
       entities: { user: (u: any) => u.id },
     })
 
     // Populate cache
-    await usersQuery.execute()
+    await usersQuery()
 
     // Subscribe to track state changes
     const states: any[] = []
@@ -265,16 +176,18 @@ describe('Integration', () => {
       states.push({ ...state })
     })
 
-    const updateUser = api.mutate('/users/:id', {
+    const updateUser = api.mutate({
+      key: '/users/:id',
+      fn: () => Promise.reject(new Error('Server error')),
       method: 'PUT',
       entities: { user: (u: any) => u.id },
     })
 
     // Execute mutation that will fail
-    const [, mutErr] = await updateUser.execute(
-      { id: '1' },
-      { name: 'Bob' }
-    )
+    const [, mutErr] = await updateUser({
+      params: { id: '1' },
+      body: { name: 'Bob' },
+    })
 
     expect(mutErr).toBeDefined()
 
@@ -290,172 +203,106 @@ describe('Integration', () => {
   })
 
   it('query with path params subscribe and execute', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve({ id: '42', name: 'Alice' }),
-      })
-    )
+    const api = createApi()
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+    const userQuery = api.query({
+      key: '/users/:id',
+      fn: () => Promise.resolve({ id: '42', name: 'Alice' }),
     })
-
-    const userQuery = api.query('/users/:id')
 
     const states: any[] = []
-    const unsub = userQuery.subscribe({ id: '42' }, (state: any) => {
+    const unsub = userQuery.subscribe((state: any) => {
       states.push({ ...state })
-    })
+    }, { params: { id: '42' } })
 
-    await userQuery.execute({ id: '42' })
+    await userQuery({ params: { id: '42' } })
 
     const lastState = states[states.length - 1]
     expect(lastState.data).toEqual({ id: '42', name: 'Alice' })
 
     // Invalidate with params
-    userQuery.invalidate({ id: '42' })
+    userQuery.invalidate({ params: { id: '42' } })
 
     unsub()
   })
 
-  it('query with search params hits correct URL', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
-      })
-    )
+  it('query with search params', async () => {
+    const fn = vi.fn().mockResolvedValue([{ id: '1', name: 'Alice' }])
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+    const api = createApi()
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn,
     })
 
-    const usersQuery = api.query('/users')
-    const [result, err] = await usersQuery.execute({
+    const [result, err] = await usersQuery({
       searchParams: { search: 'alice', page: 1 },
     })
 
     expect(err).toBeNull()
     expect(result).toEqual([{ id: '1', name: 'Alice' }])
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users?page=1&search=alice',
-      expect.any(Object)
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({ searchParams: { search: 'alice', page: 1 } })
     )
   })
 
   it('different search params produce different cache entries', async () => {
     let callCount = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => {
-        callCount++
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve([{ page: callCount }]),
-        })
-      })
-    )
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return Promise.resolve([{ page: callCount }])
+    })
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+    const api = createApi({ staleTime: 60000 })
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn,
       staleTime: 60000,
     })
 
-    const usersQuery = api.query('/users', { staleTime: 60000 })
-
-    const [r1] = await usersQuery.execute({ searchParams: { page: 1 } })
-    const [r2] = await usersQuery.execute({ searchParams: { page: 2 } })
+    const [r1] = await usersQuery({ searchParams: { page: 1 } })
+    const [r2] = await usersQuery({ searchParams: { page: 2 } })
 
     expect(r1).toEqual([{ page: 1 }])
     expect(r2).toEqual([{ page: 2 }])
     expect(callCount).toBe(2)
   })
 
-  it('mutation with search params appends to URL', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 201,
-        headers: new Headers({ 'content-length': '100' }),
-        json: () => Promise.resolve({ id: '1', name: 'Alice' }),
-      })
-    )
+  it('mutation with search params passes to fn', async () => {
+    const fn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice' })
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+    const api = createApi()
+
+    const createUser = api.mutate({
+      key: '/users',
+      fn,
+      method: 'POST',
     })
 
-    const createUser = api.mutate('/users', { method: 'POST' })
-    const [result, err] = await createUser.execute(
-      { name: 'Alice' },
-      { searchParams: { dryRun: true } }
-    )
+    const [result, err] = await createUser({
+      body: { name: 'Alice' },
+      searchParams: { dryRun: true },
+    })
 
     expect(err).toBeNull()
     expect(result).toEqual({ id: '1', name: 'Alice' })
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users?dryRun=true',
-      expect.objectContaining({ method: 'POST' })
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({ searchParams: { dryRun: true } })
     )
   })
 
   it('DELETE mutation without path params', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 204,
-        headers: new Headers(),
-        json: () => Promise.reject(new Error('no body')),
-      })
-    )
+    const api = createApi()
 
-    const api = createSafeQueryClient<AppError>({
-      name: 'test',
-      baseUrl: 'https://api.example.com',
-      parseError: (e) => ({
-        code: 'UNKNOWN',
-        message: e instanceof Error ? e.message : String(e),
-      }),
-      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+    const clearAll = api.mutate({
+      key: '/cache',
+      fn: () => Promise.resolve(undefined as void),
+      method: 'DELETE',
     })
 
-    const clearAll = api.mutate('/cache', { method: 'DELETE' })
-    const [, err] = await clearAll.execute(undefined)
+    const [, err] = await clearAll({})
     expect(err).toBeNull()
   })
 })

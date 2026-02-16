@@ -11,20 +11,23 @@ npm install @cometloop/safe-query @cometloop/safe
 ## Quick Start
 
 ```typescript
-import { createSafeQueryClient } from '@cometloop/safe-query'
+import { createSafe } from '@cometloop/safe'
+import { safeQuery } from '@cometloop/safe-query'
 
 type AppError = { code: string; message: string }
 
-// Error type E is inferred from parseError and flows to every query/mutation
-const api = createSafeQueryClient<AppError>({
-  name: 'backend',
-  baseUrl: 'https://api.example.com',
-  headers: () => ({ Authorization: `Bearer ${getToken()}` }),
+// Create a safe instance with your error handling
+const safe = createSafe<AppError>({
   parseError: (e) => ({
     code: 'UNKNOWN',
     message: e instanceof Error ? e.message : String(e),
   }),
   defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+})
+
+// Create the query client — pass your safe instance
+const api = safeQuery<AppError>({
+  safe,
   staleTime: 30_000,
   gcTime: 5 * 60_000,
 })
@@ -32,84 +35,137 @@ const api = createSafeQueryClient<AppError>({
 
 ## Typed Queries
 
-The response type is the first generic parameter. Path params are extracted from the URL pattern automatically.
+Queries return a **callable function** — call it directly to fetch data. Path params are extracted from the key pattern automatically.
 
 ```typescript
 type User = { id: string; name: string; email: string }
 
-// No path params → execute() takes no arguments
-const usersQuery = api.query<User[]>('/users')
-const [users, err] = await usersQuery.execute()
+// No path params — call with no arguments
+const getUsers = api.query({
+  key: '/users',
+  fn: (): Promise<User[]> => fetch('/api/users').then(r => r.json()),
+})
+const [users, err] = await getUsers()
 //     ^? User[]       ^? AppError | null
 
-// :id in the path → execute() requires { id: string }
-const userQuery = api.query<User>('/users/:id')
-const [user, err] = await userQuery.execute({ id: '123' })
-//                                           ^? { id: string }
+// :id in the key — call with { params: { id: string } }
+const getUser = api.query({
+  key: '/users/:id',
+  fn: ({ params }) => fetch(`/api/users/${params.id}`).then(r => r.json()) as Promise<User>,
+})
+const [user, err] = await getUser({ params: { id: '123' } })
 
-// Multiple path params → all are required
-const commentQuery = api.query('/users/:userId/posts/:postId/comments/:commentId')
-await commentQuery.execute({
-  userId: 'u1',     // ← required
-  postId: 'p1',     // ← required
-  commentId: 'c1',  // ← required
+// Multiple path params — all are required
+const getComment = api.query({
+  key: '/users/:userId/posts/:postId/comments/:commentId',
+  fn: ({ params }) =>
+    fetch(`/api/users/${params.userId}/posts/${params.postId}/comments/${params.commentId}`)
+      .then(r => r.json()),
+})
+await getComment({
+  params: { userId: 'u1', postId: 'p1', commentId: 'c1' },
+})
+```
+
+## Search Params
+
+Pass `searchParams` when calling any query or mutation. Different search params produce different cache entries.
+
+```typescript
+// Query with search params
+const [users, err] = await getUsers({
+  searchParams: { search: 'alice', page: 1, limit: 20 },
 })
 
-// Subscribe signature adapts too
-usersQuery.subscribe((state) => { ... })                      // no params
-userQuery.subscribe({ id: '123' }, (state) => { ... })        // params required
+// Combined with path params
+const getPosts = api.query({
+  key: '/users/:id/posts',
+  fn: ({ params, searchParams }) =>
+    fetch(`/api/users/${params.id}/posts?${new URLSearchParams(searchParams as any)}`)
+      .then(r => r.json()),
+})
+const [posts, err] = await getPosts({
+  params: { id: 'u1' },
+  searchParams: { page: 2, sort: 'date' },
+})
+
+// Search params are available in the fn context
+const getFiltered = api.query({
+  key: '/items',
+  fn: ({ searchParams }) => {
+    const url = new URL('/api/items', 'https://api.example.com')
+    if (searchParams) {
+      for (const [k, v] of Object.entries(searchParams)) {
+        url.searchParams.set(k, String(v))
+      }
+    }
+    return fetch(url).then(r => r.json())
+  },
+})
+
+// Mutations accept searchParams too
+const [result, err] = await createUser({
+  body: { name: 'Alice', email: 'alice@test.com' },
+  searchParams: { dryRun: true },
+})
+
+// Subscribe/invalidate/refetch with search params
+getUsers.subscribe((state) => { ... }, { searchParams: { page: 1 } })
+getUsers.invalidate({ searchParams: { page: 1 } })
+await getUsers.refetch({ searchParams: { page: 1 } })
 ```
 
 ## Typed Mutations
 
-Mutations take two generic parameters: `<ResponseType, BodyType>`.
+Mutations also return a callable. Specify `<ResponseType, BodyType>` as generics, or let the types be inferred from your `fn`.
 
 ```typescript
 type CreateUserInput = { name: string; email: string }
 type UpdateUserInput = { name?: string; email?: string }
 
-// POST — execute(body: CreateUserInput)
-const createUser = api.mutate<User, CreateUserInput>('/users', {
+// POST — call with { body: CreateUserInput }
+const createUser = api.mutate<User, CreateUserInput>({
+  key: '/users',
+  fn: ({ body }) => fetch('/api/users', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }).then(r => r.json()),
   method: 'POST',
 })
-const [user, err] = await createUser.execute({
-  name: 'Alice',          // ✓ required by CreateUserInput
-  email: 'alice@test.com' // ✓ required by CreateUserInput
+const [user, err] = await createUser({
+  body: { name: 'Alice', email: 'alice@test.com' },
 })
 
-// PUT with path params — execute(params: { id: string }, body: UpdateUserInput)
-const updateUser = api.mutate<User, UpdateUserInput>('/users/:id', {
+// PUT with path params — call with { params, body }
+const updateUser = api.mutate<User, UpdateUserInput, '/users/:id'>({
+  key: '/users/:id',
+  fn: ({ params, body }) => fetch(`/api/users/${params.id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }).then(r => r.json()),
   method: 'PUT',
 })
-const [updated, err] = await updateUser.execute(
-  { id: '123' },       // ← path params (typed from URL pattern)
-  { name: 'New Name' } // ← body (typed as UpdateUserInput)
-)
+const [updated, err] = await updateUser({
+  params: { id: '123' },
+  body: { name: 'New Name' },
+})
 
 // DELETE with path params
-const deleteUser = api.mutate('/users/:id', { method: 'DELETE' })
-const [, err] = await deleteUser.execute({ id: '123' }, undefined)
-//                                        ^? { id: string }
-
-// DELETE with typed body (bulk delete)
-type BulkDeleteInput = { ids: string[] }
-const bulkDelete = api.mutate<void, BulkDeleteInput>('/users', {
+const deleteUser = api.mutate<void, void, '/users/:id'>({
+  key: '/users/:id',
+  fn: ({ params }) => fetch(`/api/users/${params.id}`, { method: 'DELETE' }).then(() => undefined as void),
   method: 'DELETE',
 })
-await bulkDelete.execute({ ids: ['1', '2', '3'] })
-//                        ^? BulkDeleteInput
+await deleteUser({ params: { id: '123' } })
 ```
 
-If you only need the response typed (body stays `unknown`), pass a single generic:
+## Reactive Properties and Methods
+
+Query callables have reactive getters and methods attached directly to the function:
 
 ```typescript
-const createUser = api.mutate<User>('/users', { method: 'POST' })
-```
-
-## Subscriber State
-
-```typescript
-const unsub = usersQuery.subscribe((state) => {
+// Subscribe to state changes
+const unsub = getUsers.subscribe((state) => {
   state.data          // User[] | undefined
   state.error         // AppError | null
   state.status        // 'idle' | 'loading' | 'success' | 'error'
@@ -118,10 +174,20 @@ const unsub = usersQuery.subscribe((state) => {
   state.dataUpdatedAt // number | null
 })
 
+// Reactive getters on the callable itself
+getUsers.status      // 'idle' | 'loading' | 'success' | 'error'
+getUsers.data        // User[] | undefined
+getUsers.error       // AppError | null
+getUsers.isFetching  // boolean
+getUsers.isStale     // boolean
+
 // Cache control
-usersQuery.invalidate()
-usersQuery.refetch()
-userQuery.invalidate({ id: '123' })
+getUsers.invalidate()
+getUsers.refetch()
+
+// With path params — pass params to subscribe/invalidate/refetch
+getUser.subscribe((state) => { ... }, { params: { id: '123' } })
+getUser.invalidate({ params: { id: '123' } })
 ```
 
 ## Entity Normalization
@@ -130,12 +196,16 @@ Entities with a `__type` field are normalized into a shared store. When a mutati
 
 ```typescript
 // If your API returns __type natively
-const usersQuery = api.query<User[]>('/users', {
+const getUsers = api.query({
+  key: '/users',
+  fn: (): Promise<User[]> => fetch('/api/users').then(r => r.json()),
   entities: { user: (u) => u.id },
 })
 
 // If not, use parseResponse to tag them
-const postsQuery = api.query('/posts', {
+const getPosts = api.query({
+  key: '/posts',
+  fn: () => fetch('/api/posts').then(r => r.json()),
   parseResponse: (data: Post[]) =>
     data.map((post) => ({
       ...post,
@@ -154,25 +224,35 @@ const postsQuery = api.query('/posts', {
 Enable at the client level. Supported for `PUT`, `PATCH`, and `DELETE` mutations with `entities` configured. Rolls back on error.
 
 ```typescript
-const api = createSafeQueryClient<AppError>({
-  // ...
+const api = safeQuery<AppError>({
+  safe,
   enableOptimisticUpdates: true,
 })
 
-const updateUser = api.mutate<User, UpdateUserInput>('/users/:id', {
+const updateUser = api.mutate<User, UpdateUserInput, '/users/:id'>({
+  key: '/users/:id',
+  fn: ({ params, body }) => fetch(`/api/users/${params.id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }).then(r => r.json()),
   method: 'PUT',
   entities: { user: (u) => u.id },
 })
 
 // Subscribers see optimistic state immediately, then server-confirmed state.
 // On error, original state is restored.
-await updateUser.execute({ id: '123' }, { name: 'New Name' })
+await updateUser({ params: { id: '123' }, body: { name: 'New Name' } })
 ```
 
 For mutations with multiple entity types, specify which to update optimistically:
 
 ```typescript
-const updatePost = api.mutate<Post, UpdatePostInput>('/posts/:postId', {
+const updatePost = api.mutate({
+  key: '/posts/:postId',
+  fn: ({ params, body }) => fetch(`/api/posts/${params.postId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }).then(r => r.json()),
   method: 'PUT',
   entities: { post: (p) => p.id, user: (u) => u.id },
   optimistic: {
@@ -182,13 +262,27 @@ const updatePost = api.mutate<Post, UpdatePostInput>('/posts/:postId', {
 })
 ```
 
+## Utilities
+
+`fetchJson` and `buildUrl` are available as opt-in utilities if you want them:
+
+```typescript
+import { fetchJson, buildUrl } from '@cometloop/safe-query'
+
+// fetchJson: fetch wrapper that handles JSON parsing and error responses
+const data = await fetchJson<User>('https://api.example.com/users/1')
+
+// buildUrl: constructs URLs with path params and search params
+const url = buildUrl('https://api.example.com', '/users/:id', { id: '1' }, { page: 2 })
+// → 'https://api.example.com/users/1?page=2'
+```
+
 ## Configuration
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `staleTime` | `0` | Ms before cached data is considered stale |
 | `gcTime` | `300000` | Ms before unused cache entries are garbage collected |
-| `retry` | `undefined` | Retry config: `{ times: 3, waitBefore: (n) => n * 1000 }` |
 | `enableOptimisticUpdates` | `false` | Enable optimistic mutations |
 
 All options can be overridden per-query/mutation.

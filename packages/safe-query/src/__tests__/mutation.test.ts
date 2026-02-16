@@ -16,23 +16,9 @@ function createDeps(overrides: Record<string, any> = {}) {
     queryCache: new QueryCache(),
     entityStore: new EntityStore(),
     notifier: new Notifier(),
-    baseUrl: 'https://api.example.com',
-    headers: undefined,
     enableOptimisticUpdates: false,
     ...overrides,
   }
-}
-
-function mockFetchResponse(data: any, status = 200) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue({
-      ok: true,
-      status,
-      headers: new Headers({ 'content-length': '100' }),
-      json: () => Promise.resolve(data),
-    })
-  )
 }
 
 describe('createMutation', () => {
@@ -42,95 +28,97 @@ describe('createMutation', () => {
 
   it('executes a POST mutation with body', async () => {
     const response = { id: '1', name: 'Alice' }
-    mockFetchResponse(response, 201)
+    const fn = vi.fn().mockResolvedValue(response)
 
     const deps = createDeps()
-    const mutation = createMutation('/users', { method: 'POST' }, deps)
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+    }, deps)
 
-    const [result, err] = await mutation.execute({ name: 'Alice' })
+    const [result, err] = await mutation({ body: { name: 'Alice' } })
     expect(err).toBeNull()
     expect(result).toEqual(response)
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ name: 'Alice' }),
-      })
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { name: 'Alice' } })
     )
   })
 
   it('executes a PUT mutation with params and body', async () => {
     const response = { id: '123', name: 'Updated' }
-    mockFetchResponse(response)
+    const fn = vi.fn().mockResolvedValue(response)
 
     const deps = createDeps()
-    const mutation = createMutation('/users/:id', { method: 'PUT' }, deps)
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
+      method: 'PUT',
+    }, deps)
 
-    const [result, err] = await mutation.execute(
-      { id: '123' },
-      { name: 'Updated' }
-    )
+    const [result, err] = await mutation({
+      params: { id: '123' },
+      body: { name: 'Updated' },
+    })
     expect(err).toBeNull()
     expect(result).toEqual(response)
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users/123',
+    expect(fn).toHaveBeenCalledWith(
       expect.objectContaining({
-        method: 'PUT',
-        body: JSON.stringify({ name: 'Updated' }),
+        params: { id: '123' },
+        body: { name: 'Updated' },
       })
     )
   })
 
   it('executes a DELETE mutation with params', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 204,
-        headers: new Headers(),
-        json: () => Promise.reject(new Error('no body')),
-      })
-    )
+    const fn = vi.fn().mockResolvedValue(undefined)
 
     const deps = createDeps()
-    const mutation = createMutation('/users/:id', { method: 'DELETE' }, deps)
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
+      method: 'DELETE',
+    }, deps)
 
-    const [_result, err] = await mutation.execute({ id: '123' }, undefined)
+    const [_result, err] = await mutation({ params: { id: '123' } })
     expect(err).toBeNull()
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users/123',
-      expect.objectContaining({ method: 'DELETE' })
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({ params: { id: '123' } })
     )
   })
 
   it('applies parseResponse', async () => {
-    mockFetchResponse({ id: '1', name: 'Alice' })
+    const fn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice' })
 
     const deps = createDeps()
-    const mutation = createMutation('/users', {
+    const mutation = createMutation({
+      key: '/users',
+      fn,
       method: 'POST',
       parseResponse: (data: any) => ({ ...data, __type: 'user' as const }),
     }, deps)
 
-    const [result, err] = await mutation.execute({ name: 'Alice' })
+    const [result, err] = await mutation({ body: { name: 'Alice' } })
     expect(err).toBeNull()
     expect(result).toEqual({ id: '1', name: 'Alice', __type: 'user' })
   })
 
   it('normalizes entities from mutation response', async () => {
-    mockFetchResponse({
+    const fn = vi.fn().mockResolvedValue({
       id: '1',
       name: 'Updated',
       __type: 'user',
     })
 
     const deps = createDeps()
-    const mutation = createMutation('/users/:id', {
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
       method: 'PUT',
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    await mutation.execute({ id: '1' }, { name: 'Updated' })
+    await mutation({ params: { id: '1' }, body: { name: 'Updated' } })
     expect(deps.entityStore.get('user', '1')).toEqual({
       id: '1',
       name: 'Updated',
@@ -143,17 +131,7 @@ describe('createMutation', () => {
     const fetchPromise = new Promise((resolve) => {
       resolvePromise = resolve
     })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(
-        fetchPromise.then((data) => ({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve(data),
-        }))
-      )
-    )
+    const fn = vi.fn().mockReturnValue(fetchPromise)
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
@@ -172,12 +150,14 @@ describe('createMutation', () => {
 
     const notifySpy = vi.spyOn(deps.notifier, 'notifyMany')
 
-    const mutation = createMutation('/users/:id', {
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
       method: 'PUT',
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    const executePromise = mutation.execute({ id: '1' }, { name: 'Bob' })
+    const executePromise = mutation({ params: { id: '1' }, body: { name: 'Bob' } })
 
     // Optimistic update should be applied immediately
     expect(deps.entityStore.get('user', '1')).toEqual(
@@ -191,10 +171,7 @@ describe('createMutation', () => {
   })
 
   it('rolls back optimistic update on error', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new Error('Server error'))
-    )
+    const fn = vi.fn().mockRejectedValue(new Error('Server error'))
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
@@ -210,12 +187,14 @@ describe('createMutation', () => {
       new Set(['user:1'])
     )
 
-    const mutation = createMutation('/users/:id', {
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
       method: 'PUT',
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    const [, err] = await mutation.execute({ id: '1' }, { name: 'Bob' })
+    const [, err] = await mutation({ params: { id: '1' }, body: { name: 'Bob' } })
 
     expect(err).toBe('Server error')
     // Should be rolled back
@@ -231,17 +210,7 @@ describe('createMutation', () => {
     const fetchPromise = new Promise((resolve) => {
       resolvePromise = resolve
     })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(
-        fetchPromise.then(() => ({
-          ok: true,
-          status: 204,
-          headers: new Headers(),
-          json: () => Promise.reject(new Error('no body')),
-        }))
-      )
-    )
+    const fn = vi.fn().mockReturnValue(fetchPromise)
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
@@ -256,12 +225,14 @@ describe('createMutation', () => {
       new Set(['user:1'])
     )
 
-    const mutation = createMutation('/users/:id', {
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
       method: 'DELETE',
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    const executePromise = mutation.execute({ id: '1' }, undefined)
+    const executePromise = mutation({ params: { id: '1' } })
 
     // Entity should be deleted optimistically
     expect(deps.entityStore.get('user', '1')).toBeUndefined()
@@ -271,16 +242,18 @@ describe('createMutation', () => {
   })
 
   it('does not perform optimistic update for POST', async () => {
-    mockFetchResponse({ id: '1', name: 'Alice', __type: 'user' }, 201)
+    const fn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice', __type: 'user' })
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
-    const mutation = createMutation('/users', {
+    const mutation = createMutation({
+      key: '/users',
+      fn,
       method: 'POST',
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    await mutation.execute({ name: 'Alice' })
+    await mutation({ body: { name: 'Alice' } })
 
     // Entity should be set from server response, not optimistically
     expect(deps.entityStore.get('user', '1')).toEqual({
@@ -291,36 +264,18 @@ describe('createMutation', () => {
   })
 
   it('handles fetch errors', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new Error('Network error'))
-    )
+    const fn = vi.fn().mockRejectedValue(new Error('Network error'))
 
     const deps = createDeps()
-    const mutation = createMutation('/users', { method: 'POST' }, deps)
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+    }, deps)
 
-    const [result, err] = await mutation.execute({ name: 'Alice' })
+    const [result, err] = await mutation({ body: { name: 'Alice' } })
     expect(result).toBeNull()
     expect(err).toBe('Network error')
-  })
-
-  it('provides headers from config', async () => {
-    mockFetchResponse({})
-
-    const deps = createDeps({
-      headers: () => ({ Authorization: 'Bearer token' }),
-    })
-    const mutation = createMutation('/users', { method: 'POST' }, deps)
-
-    await mutation.execute({ name: 'Alice' })
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer token',
-        }),
-      })
-    )
   })
 
   it('uses explicit optimistic config', async () => {
@@ -328,17 +283,7 @@ describe('createMutation', () => {
     const fetchPromise = new Promise((resolve) => {
       resolvePromise = resolve
     })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(
-        fetchPromise.then((data) => ({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve(data),
-        }))
-      )
-    )
+    const fn = vi.fn().mockReturnValue(fetchPromise)
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
@@ -353,7 +298,9 @@ describe('createMutation', () => {
       new Set(['post:p1'])
     )
 
-    const mutation = createMutation('/posts/:postId', {
+    const mutation = createMutation({
+      key: '/posts/:postId',
+      fn,
       method: 'PUT',
       entities: {
         post: (p: any) => p.id,
@@ -365,10 +312,10 @@ describe('createMutation', () => {
       },
     } as any, deps)
 
-    const executePromise = mutation.execute(
-      { postId: 'p1' },
-      { title: 'New Title' }
-    )
+    const executePromise = mutation({
+      params: { postId: 'p1' },
+      body: { title: 'New Title' },
+    } as any)
 
     // Optimistic update using explicit config
     expect(deps.entityStore.get('post', 'p1')).toEqual(
@@ -384,27 +331,19 @@ describe('createMutation', () => {
     const fetchPromise = new Promise((resolve) => {
       resolvePromise = resolve
     })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(
-        fetchPromise.then((data) => ({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve(data),
-        }))
-      )
-    )
+    const fn = vi.fn().mockReturnValue(fetchPromise)
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
     // Don't pre-populate entity store - entity doesn't exist
-    const mutation = createMutation('/users/:id', {
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
       method: 'PUT',
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    const executePromise = mutation.execute({ id: '1' }, { name: 'Bob' })
+    const executePromise = mutation({ params: { id: '1' }, body: { name: 'Bob' } })
 
     // No optimistic update because entity doesn't exist in store
     expect(deps.entityStore.get('user', '1')).toBeUndefined()
@@ -414,7 +353,7 @@ describe('createMutation', () => {
   })
 
   it('skips optimistic when multiple entity keys and no explicit config', async () => {
-    mockFetchResponse({ id: '1', name: 'Bob', __type: 'user' })
+    const fn = vi.fn().mockResolvedValue({ id: '1', name: 'Bob', __type: 'user' })
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
@@ -424,7 +363,9 @@ describe('createMutation', () => {
       __type: 'user',
     })
 
-    const mutation = createMutation('/users/:id', {
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
       method: 'PUT',
       entities: {
         user: (u: any) => u.id,
@@ -433,29 +374,22 @@ describe('createMutation', () => {
     }, deps)
 
     // Should not crash; no optimistic update because multiple entity types
-    await mutation.execute({ id: '1' }, { name: 'Bob' })
+    await mutation({ params: { id: '1' }, body: { name: 'Bob' } })
   })
 
   it('DELETE without path params', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 204,
-        headers: new Headers(),
-        json: () => Promise.reject(new Error('no body')),
-      })
-    )
+    const fn = vi.fn().mockResolvedValue(undefined)
 
     const deps = createDeps()
-    const mutation = createMutation('/cache', { method: 'DELETE' }, deps)
+    const mutation = createMutation({
+      key: '/cache',
+      fn,
+      method: 'DELETE',
+    }, deps)
 
-    const [, err] = await mutation.execute(undefined)
+    const [, err] = await mutation({})
     expect(err).toBeNull()
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/cache',
-      expect.objectContaining({ method: 'DELETE' })
-    )
+    expect(fn).toHaveBeenCalled()
   })
 
   it('PATCH mutation with optimistic update', async () => {
@@ -463,17 +397,7 @@ describe('createMutation', () => {
     const fetchPromise = new Promise((resolve) => {
       resolvePromise = resolve
     })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockReturnValue(
-        fetchPromise.then((data) => ({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-length': '100' }),
-          json: () => Promise.resolve(data),
-        }))
-      )
-    )
+    const fn = vi.fn().mockReturnValue(fetchPromise)
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
@@ -489,12 +413,14 @@ describe('createMutation', () => {
       new Set(['user:1'])
     )
 
-    const mutation = createMutation('/users/:id', {
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
       method: 'PATCH',
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    const executePromise = mutation.execute({ id: '1' }, { name: 'Bob' })
+    const executePromise = mutation({ params: { id: '1' }, body: { name: 'Bob' } })
 
     // Optimistic update should merge
     expect(deps.entityStore.get('user', '1')).toEqual(
@@ -505,50 +431,57 @@ describe('createMutation', () => {
     await executePromise
   })
 
-  it('appends search params to mutation URL', async () => {
+  it('passes searchParams to fn context', async () => {
     const response = { id: '1', name: 'Alice' }
-    mockFetchResponse(response, 201)
+    const fn = vi.fn().mockResolvedValue(response)
 
     const deps = createDeps()
-    const mutation = createMutation('/users', { method: 'POST' }, deps)
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+    }, deps)
 
-    const [result, err] = await mutation.execute(
-      { name: 'Alice' },
-      { searchParams: { dryRun: true } }
-    )
+    const [result, err] = await mutation({
+      body: { name: 'Alice' },
+      searchParams: { dryRun: true },
+    })
     expect(err).toBeNull()
     expect(result).toEqual(response)
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users?dryRun=true',
-      expect.objectContaining({ method: 'POST' })
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({ searchParams: { dryRun: true } })
     )
   })
 
-  it('appends search params to mutation URL with path params', async () => {
+  it('passes searchParams with path params to fn context', async () => {
     const response = { id: '123', name: 'Updated' }
-    mockFetchResponse(response)
+    const fn = vi.fn().mockResolvedValue(response)
 
     const deps = createDeps()
-    const mutation = createMutation('/users/:id', { method: 'PUT' }, deps)
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
+      method: 'PUT',
+    }, deps)
 
-    const [result, err] = await mutation.execute(
-      { id: '123' },
-      { name: 'Updated' },
-      { searchParams: { notify: true } }
-    )
+    const [result, err] = await mutation({
+      params: { id: '123' },
+      body: { name: 'Updated' },
+      searchParams: { notify: true },
+    })
     expect(err).toBeNull()
     expect(result).toEqual(response)
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.example.com/users/123?notify=true',
-      expect.objectContaining({ method: 'PUT' })
+    expect(fn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { id: '123' },
+        body: { name: 'Updated' },
+        searchParams: { notify: true },
+      })
     )
   })
 
   it('rolls back optimistic delete on error', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new Error('Server error'))
-    )
+    const fn = vi.fn().mockRejectedValue(new Error('Server error'))
 
     const deps = createDeps({ enableOptimisticUpdates: true })
 
@@ -563,12 +496,14 @@ describe('createMutation', () => {
       new Set(['user:1'])
     )
 
-    const mutation = createMutation('/users/:id', {
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
       method: 'DELETE',
       entities: { user: (u: any) => u.id },
     }, deps)
 
-    const [, err] = await mutation.execute({ id: '1' }, undefined)
+    const [, err] = await mutation({ params: { id: '1' } })
     expect(err).toBe('Server error')
 
     // Should be rolled back

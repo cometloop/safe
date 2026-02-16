@@ -1,10 +1,9 @@
-import { createSafe } from '@cometloop/safe'
 import type {
-  CreateSafeQueryClientConfig,
+  SafeQueryConfig,
   QueryConfig,
   MutationConfig,
-  QueryObject,
-  MutationObject,
+  QueryCallable,
+  MutationCallable,
 } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
@@ -13,13 +12,12 @@ import { createQuery } from './query'
 import { createMutation } from './mutation'
 
 export type SafeQueryClient<E> = {
-  query: <TData, TPath extends string, TParsed = TData>(
-    path: TPath,
-    config?: QueryConfig<TData, TParsed>
-  ) => QueryObject<TParsed extends TData ? TData : TParsed, E, TPath>
+  query: <TData, TPath extends string = string, TParsed = TData>(
+    config: QueryConfig<TData, TPath, TParsed>
+  ) => QueryCallable<TParsed, E, TPath>
   mutate: <
     TData = void,
-    TBody = unknown,
+    TBody = void,
     TPath extends string = string,
     TMethod extends 'POST' | 'PUT' | 'PATCH' | 'DELETE' =
       | 'POST'
@@ -28,53 +26,38 @@ export type SafeQueryClient<E> = {
       | 'DELETE',
     TParsed = TData,
   >(
-    path: TPath,
-    config: MutationConfig<TData, TPath, TMethod, TParsed>
-  ) => MutationObject<
-    TParsed extends TData ? TData : TParsed,
+    config: MutationConfig<TData, TBody, TPath, TMethod, TParsed>
+  ) => MutationCallable<
+    TParsed,
     E,
     TPath,
-    TMethod,
     TBody
   >
 }
 
-export function createSafeQueryClient<E>(
-  config: CreateSafeQueryClientConfig<E>
+export function safeQuery<E>(
+  config: SafeQueryConfig<E>
 ): SafeQueryClient<E> {
   const {
-    baseUrl,
-    headers,
+    safe: safeInstance,
     enableOptimisticUpdates = false,
-    parseError,
-    defaultError,
-    retry,
     staleTime = 0,
     gcTime = 5 * 60_000,
   } = config
-
-  const safeInstance = createSafe({
-    parseError: parseError as (e: unknown) => any,
-    defaultError: defaultError as any,
-    retry,
-  })
 
   const queryCache = new QueryCache(staleTime, gcTime)
   const entityStore = new EntityStore()
   const notifier = new Notifier()
 
   return {
-    query: <TData, TPath extends string, TParsed = TData>(
-      path: TPath,
-      queryConfig?: QueryConfig<TData, TParsed>
+    query: <TData, TPath extends string = string, TParsed = TData>(
+      queryConfig: QueryConfig<TData, TPath, TParsed>
     ) => {
-      return createQuery(path, queryConfig as any, {
+      return createQuery(queryConfig as any, {
         safeInstance,
         queryCache,
         entityStore,
         notifier,
-        baseUrl,
-        headers,
         defaultStaleTime: staleTime,
         defaultGcTime: gcTime,
       }) as any
@@ -82,7 +65,7 @@ export function createSafeQueryClient<E>(
 
     mutate: <
       TData = void,
-      _TBody = unknown,
+      TBody = void,
       TPath extends string = string,
       TMethod extends 'POST' | 'PUT' | 'PATCH' | 'DELETE' =
         | 'POST'
@@ -91,16 +74,13 @@ export function createSafeQueryClient<E>(
         | 'DELETE',
       TParsed = TData,
     >(
-      path: TPath,
-      mutationConfig: MutationConfig<TData, TPath, TMethod, TParsed>
+      mutationConfig: MutationConfig<TData, TBody, TPath, TMethod, TParsed>
     ) => {
-      return createMutation(path, mutationConfig as any, {
+      return createMutation(mutationConfig as any, {
         safeInstance,
         queryCache,
         entityStore,
         notifier,
-        baseUrl,
-        headers,
         enableOptimisticUpdates,
       }) as any
     },

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { createSafeQueryClient } from '../client'
+import { createSafe } from '@cometloop/safe'
+import { safeQuery } from '../client'
 
 /**
  * These tests verify that the type system correctly infers and enforces
@@ -12,21 +13,7 @@ type User = { id: string; name: string; email: string }
 type CreateUserInput = { name: string; email: string }
 type UpdateUserInput = { name?: string; email?: string }
 
-function mockFetch(data: any) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-length': '100' }),
-      json: () => Promise.resolve(data),
-    })
-  )
-}
-
-const api = createSafeQueryClient<AppError>({
-  name: 'test',
-  baseUrl: 'https://api.example.com',
+const safe = createSafe<AppError>({
   parseError: (e) => ({
     code: 'UNKNOWN',
     message: e instanceof Error ? e.message : String(e),
@@ -34,16 +21,19 @@ const api = createSafeQueryClient<AppError>({
   defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
 })
 
+const api = safeQuery<AppError>({ safe })
+
 describe('Type inference', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
   it('query response is typed as TData', async () => {
-    mockFetch([{ id: '1', name: 'Alice', email: 'alice@test.com' }])
-
-    const usersQuery = api.query<User[]>('/users')
-    const [users, err] = await usersQuery.execute()
+    const usersQuery = api.query({
+      key: '/users' as const,
+      fn: (): Promise<User[]> => Promise.resolve([{ id: '1', name: 'Alice', email: 'alice@test.com' }]),
+    })
+    const [users, err] = await usersQuery()
 
     if (!err) {
       // users is typed as User[]
@@ -54,11 +44,12 @@ describe('Type inference', () => {
   })
 
   it('query with path params requires params object', async () => {
-    mockFetch({ id: '123', name: 'Alice', email: 'alice@test.com' })
-
-    const userQuery = api.query<User>('/users/:id')
-    // execute requires { id: string }
-    const [user, err] = await userQuery.execute({ id: '123' })
+    const userQuery = api.query({
+      key: '/users/:id',
+      fn: (): Promise<User> => Promise.resolve({ id: '123', name: 'Alice', email: 'alice@test.com' }),
+    })
+    // execute requires { params: { id: string } }
+    const [user, err] = await userQuery({ params: { id: '123' } })
 
     if (!err) {
       expect(user.name).toBe('Alice')
@@ -66,14 +57,17 @@ describe('Type inference', () => {
   })
 
   it('query with multiple path params requires all params', async () => {
-    mockFetch({ id: 'c1', body: 'Great post!' })
-
-    const commentQuery = api.query('/users/:userId/posts/:postId/comments/:commentId')
-    // execute requires { userId, postId, commentId }
-    const [result, err] = await commentQuery.execute({
-      userId: 'u1',
-      postId: 'p1',
-      commentId: 'c1',
+    const commentQuery = api.query({
+      key: '/users/:userId/posts/:postId/comments/:commentId',
+      fn: () => Promise.resolve({ id: 'c1', body: 'Great post!' }),
+    })
+    // execute requires { params: { userId, postId, commentId } }
+    const [result, err] = await commentQuery({
+      params: {
+        userId: 'u1',
+        postId: 'p1',
+        commentId: 'c1',
+      },
     })
 
     expect(err).toBeNull()
@@ -81,17 +75,19 @@ describe('Type inference', () => {
   })
 
   it('mutation with typed body enforces body shape', async () => {
-    mockFetch({ id: '1', name: 'Alice', email: 'alice@test.com' })
-
     // TData = User, TBody = CreateUserInput
-    const createUser = api.mutate<User, CreateUserInput>('/users', {
+    const createUser = api.mutate<User, CreateUserInput>({
+      key: '/users',
+      fn: ({ body }) => Promise.resolve({ id: '1', ...body, } as User),
       method: 'POST',
     })
 
     // body is typed as CreateUserInput
-    const [user, err] = await createUser.execute({
-      name: 'Alice',
-      email: 'alice@test.com',
+    const [user, err] = await createUser({
+      body: {
+        name: 'Alice',
+        email: 'alice@test.com',
+      },
     })
 
     if (!err) {
@@ -100,18 +96,18 @@ describe('Type inference', () => {
   })
 
   it('PUT mutation with path params and typed body', async () => {
-    mockFetch({ id: '123', name: 'Updated', email: 'updated@test.com' })
-
-    // TData = User, TBody = UpdateUserInput
-    const updateUser = api.mutate<User, UpdateUserInput>('/users/:id', {
+    // TData = User, TBody = UpdateUserInput, TPath inferred
+    const updateUser = api.mutate<User, UpdateUserInput, '/users/:id'>({
+      key: '/users/:id',
+      fn: () => Promise.resolve({ id: '123', name: 'Updated', email: 'updated@test.com' }),
       method: 'PUT',
     })
 
-    // execute(params: { id: string }, body: UpdateUserInput)
-    const [user, err] = await updateUser.execute(
-      { id: '123' },
-      { name: 'Updated' }
-    )
+    // execute({ params: { id: string }, body: UpdateUserInput })
+    const [user, err] = await updateUser({
+      params: { id: '123' },
+      body: { name: 'Updated' },
+    })
 
     if (!err) {
       expect(user.name).toBe('Updated')
@@ -119,33 +115,23 @@ describe('Type inference', () => {
   })
 
   it('DELETE mutation can take a body for bulk deletes', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 204,
-        headers: new Headers(),
-        json: () => Promise.reject(new Error('no body')),
-      })
-    )
-
     type BulkDeleteInput = { ids: string[] }
-    const deleteUsers = api.mutate<void, BulkDeleteInput>('/users', {
+    const deleteUsers = api.mutate<void, BulkDeleteInput>({
+      key: '/users',
+      fn: () => Promise.resolve(undefined as void),
       method: 'DELETE',
     })
     // body is typed as BulkDeleteInput
-    const [, err] = await deleteUsers.execute({ ids: ['1', '2', '3'] })
+    const [, err] = await deleteUsers({ body: { ids: ['1', '2', '3'] } })
     expect(err).toBeNull()
   })
 
   it('error type flows from client config', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new Error('Network error'))
-    )
-
-    const usersQuery = api.query<User[]>('/users')
-    const [, err] = await usersQuery.execute()
+    const usersQuery = api.query({
+      key: '/users',
+      fn: (): Promise<User[]> => Promise.reject(new Error('Network error')),
+    })
+    const [, err] = await usersQuery()
 
     if (err) {
       // err is typed as AppError
@@ -157,10 +143,11 @@ describe('Type inference', () => {
   })
 
   it('query execute accepts searchParams in options', async () => {
-    mockFetch([{ id: '1', name: 'Alice', email: 'alice@test.com' }])
-
-    const usersQuery = api.query<User[]>('/users')
-    const [users, err] = await usersQuery.execute({
+    const usersQuery = api.query({
+      key: '/users',
+      fn: (): Promise<User[]> => Promise.resolve([{ id: '1', name: 'Alice', email: 'alice@test.com' }]),
+    })
+    const [users, err] = await usersQuery({
       searchParams: { search: 'alice', page: 1 },
     })
 
@@ -170,29 +157,30 @@ describe('Type inference', () => {
   })
 
   it('query with path params accepts searchParams in options', async () => {
-    mockFetch([{ id: 'p1', title: 'Hello' }])
-
-    const postsQuery = api.query('/users/:id/posts')
-    const [posts, err] = await postsQuery.execute(
-      { id: 'u1' },
-      { searchParams: { page: 1, limit: 10 } }
-    )
+    const postsQuery = api.query({
+      key: '/users/:id/posts',
+      fn: () => Promise.resolve([{ id: 'p1', title: 'Hello' }]),
+    })
+    const [posts, err] = await postsQuery({
+      params: { id: 'u1' },
+      searchParams: { page: 1, limit: 10 },
+    })
 
     expect(err).toBeNull()
     expect(posts).toBeDefined()
   })
 
   it('mutation accepts searchParams in options', async () => {
-    mockFetch({ id: '1', name: 'Alice', email: 'alice@test.com' })
-
-    const createUser = api.mutate<User, CreateUserInput>('/users', {
+    const createUser = api.mutate<User, CreateUserInput>({
+      key: '/users',
+      fn: ({ body }) => Promise.resolve({ id: '1', ...body } as User),
       method: 'POST',
     })
 
-    const [user, err] = await createUser.execute(
-      { name: 'Alice', email: 'alice@test.com' },
-      { searchParams: { dryRun: true } }
-    )
+    const [user, err] = await createUser({
+      body: { name: 'Alice', email: 'alice@test.com' },
+      searchParams: { dryRun: true },
+    })
 
     if (!err) {
       expect(user.name).toBe('Alice')
@@ -200,9 +188,10 @@ describe('Type inference', () => {
   })
 
   it('subscribe state is typed with TData and TError', async () => {
-    mockFetch([{ id: '1', name: 'Alice', email: 'alice@test.com' }])
-
-    const usersQuery = api.query<User[]>('/users')
+    const usersQuery = api.query({
+      key: '/users',
+      fn: (): Promise<User[]> => Promise.resolve([{ id: '1', name: 'Alice', email: 'alice@test.com' }]),
+    })
 
     const unsub = usersQuery.subscribe((state) => {
       // state.data is User[] | undefined
@@ -217,7 +206,7 @@ describe('Type inference', () => {
       }
     })
 
-    await usersQuery.execute()
+    await usersQuery()
     unsub()
   })
 })
