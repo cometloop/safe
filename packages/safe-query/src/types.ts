@@ -98,7 +98,7 @@ export type CacheEntry<TData> = {
   gcTimer: ReturnType<typeof setTimeout> | null
   subscriberCount: number
   generation: number
-  inflightPromise: Promise<SafeResult<any, any>> | null
+  inflightPromise: Promise<SafeResult<unknown, unknown>> | null
   entityKeys: Set<string>
 }
 

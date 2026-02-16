@@ -190,6 +190,86 @@ getUser.subscribe((state) => { ... }, { params: { id: '123' } })
 getUser.invalidate({ params: { id: '123' } })
 ```
 
+## Conditional Queries
+
+Pass `enabled: false` to skip a fetch and return cached data (or `[null, null]` if nothing is cached). Useful when a dependency like a param isn't ready yet.
+
+```typescript
+const userId = getUserId() // might be null
+
+const [user, err] = await getUser({
+  params: { id: userId! },
+  enabled: !!userId, // no network request when userId is falsy
+})
+```
+
+## Lifecycle Callbacks
+
+Add `onSuccess`, `onError`, and `onSettled` callbacks to queries and mutations. These run **after** internal cache/entity logic and never interfere with the underlying `safe` instance hooks.
+
+Callbacks can be set at **config level** (shared across all calls) and at **invoke level** (per-call). Config callbacks run first, then invoke callbacks.
+
+```typescript
+// Config-level — runs on every call
+const getUsers = api.query({
+  key: '/users',
+  fn: () => fetch('/api/users').then(r => r.json()),
+  onSuccess: (data) => console.log('Fetched users:', data.length),
+  onError: (error) => console.error('Failed to fetch users:', error),
+  onSettled: (data, error) => console.log('Done', { data, error }),
+})
+
+// Invoke-level — runs for this specific call only
+const [users, err] = await getUsers({
+  onSuccess: (data) => analytics.track('users_loaded', { count: data.length }),
+})
+
+// Same pattern for mutations
+const createUser = api.mutate<User, CreateUserInput>({
+  key: '/users',
+  fn: ({ body }) => fetch('/api/users', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }).then(r => r.json()),
+  method: 'POST',
+  onSuccess: (user) => getUsers.invalidate(), // always invalidate the list
+})
+
+const [user, err] = await createUser({
+  body: { name: 'Alice', email: 'alice@test.com' },
+  onSuccess: (user) => navigate(`/users/${user.id}`), // per-call redirect
+})
+```
+
+## Cache Invalidation
+
+Invalidate queries by exact key, by prefix, or all at once. Subscribers are notified immediately.
+
+```typescript
+// Exact key (on query callable)
+getUsers.invalidate()
+getUser.invalidate({ params: { id: '123' } })
+
+// By prefix — invalidates all queries whose cache key starts with the prefix
+api.invalidateByPrefix('/users')   // invalidates /users, /users?id=123, etc.
+
+// All queries
+api.invalidateAll()
+```
+
+## Client Lifecycle
+
+```typescript
+// Soft reset — clears cache and entity store, client remains usable
+api.clear()
+
+// Hard teardown — clears everything, removes all listeners, prevents further use
+api.destroy()
+
+// After destroy(), calling query()/mutate()/etc. throws:
+// "SafeQueryClient has been destroyed and can no longer be used."
+```
+
 ## Entity Normalization
 
 Entities with a `__type` field are normalized into a shared store. When a mutation updates an entity, all queries containing it are notified automatically.
@@ -285,7 +365,18 @@ const url = buildUrl('https://api.example.com', '/users/:id', { id: '1' }, { pag
 | `gcTime` | `300000` | Ms before unused cache entries are garbage collected |
 | `enableOptimisticUpdates` | `false` | Enable optimistic mutations |
 
-All options can be overridden per-query/mutation.
+`staleTime`, `gcTime`, and `retry` can be overridden per-query/mutation.
+
+### Client Methods
+
+| Method | Description |
+|--------|-------------|
+| `query(config)` | Create a query callable |
+| `mutate(config)` | Create a mutation callable |
+| `invalidateByPrefix(prefix)` | Invalidate all queries whose key starts with `prefix` |
+| `invalidateAll()` | Invalidate every cached query |
+| `clear()` | Soft reset — clears cache and entity store |
+| `destroy()` | Hard teardown — clears all state and prevents further use |
 
 ## License
 

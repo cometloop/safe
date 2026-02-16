@@ -49,8 +49,8 @@ export function safeQuery<E>(
     gcTime = 5 * 60_000,
   } = config
 
-  const queryCache = new QueryCache(staleTime, gcTime)
   const entityStore = new EntityStore()
+  const queryCache = new QueryCache(staleTime, gcTime, (key) => entityStore.unregisterQuery(key))
   const notifier = new Notifier()
   let disposed = false
 

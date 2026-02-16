@@ -5,10 +5,12 @@ export class QueryCache {
 
   private defaultStaleTime: number
   private defaultGcTime: number
+  private onEvict?: (key: string) => void
 
-  constructor(defaultStaleTime = 0, defaultGcTime = 5 * 60_000) {
+  constructor(defaultStaleTime = 0, defaultGcTime = 5 * 60_000, onEvict?: (key: string) => void) {
     this.defaultStaleTime = defaultStaleTime
     this.defaultGcTime = defaultGcTime
+    this.onEvict = onEvict
   }
 
   buildKey(
@@ -154,6 +156,7 @@ export class QueryCache {
       // Double check no subscribers were added
       if (entry.subscriberCount === 0) {
         this.cache.delete(key)
+        this.onEvict?.(key)
       }
       entry.gcTimer = null
     }, entry.gcTime)
@@ -166,6 +169,7 @@ export class QueryCache {
         clearTimeout(entry.gcTimer)
       }
       this.cache.delete(key)
+      this.onEvict?.(key)
     }
   }
 

@@ -302,6 +302,55 @@ describe('QueryCache', () => {
     })
   })
 
+  describe('onEvict callback', () => {
+    it('calls onEvict when GC removes an entry', () => {
+      const onEvict = vi.fn()
+      const cache = new QueryCache(0, 500, onEvict)
+      cache.getOrCreate('/users', 0, 500)
+      cache.addSubscriber('/users')
+      cache.removeSubscriber('/users')
+
+      vi.advanceTimersByTime(501)
+
+      expect(onEvict).toHaveBeenCalledOnce()
+      expect(onEvict).toHaveBeenCalledWith('/users')
+    })
+
+    it('calls onEvict when entry is explicitly deleted', () => {
+      const onEvict = vi.fn()
+      const cache = new QueryCache(0, 5000, onEvict)
+      cache.getOrCreate('/users')
+
+      cache.delete('/users')
+
+      expect(onEvict).toHaveBeenCalledOnce()
+      expect(onEvict).toHaveBeenCalledWith('/users')
+    })
+
+    it('does not call onEvict when deleting non-existent key', () => {
+      const onEvict = vi.fn()
+      const cache = new QueryCache(0, 5000, onEvict)
+
+      cache.delete('/missing')
+
+      expect(onEvict).not.toHaveBeenCalled()
+    })
+
+    it('does not call onEvict when GC is cancelled by re-subscribe', () => {
+      const onEvict = vi.fn()
+      const cache = new QueryCache(0, 500, onEvict)
+      cache.getOrCreate('/users', 0, 500)
+      cache.addSubscriber('/users')
+      cache.removeSubscriber('/users')
+
+      cache.addSubscriber('/users') // cancel GC
+
+      vi.advanceTimersByTime(501)
+
+      expect(onEvict).not.toHaveBeenCalled()
+    })
+  })
+
   describe('keys', () => {
     it('returns all cache keys', () => {
       const cache = new QueryCache()

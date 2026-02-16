@@ -55,7 +55,7 @@ export function createMutation<
     if (optimisticConfig) {
       return {
         entityType: optimisticConfig.entityType,
-        entityId: optimisticConfig.entityId(params as any),
+        entityId: (optimisticConfig.entityId as (p: Record<string, string>) => string)(params!),
       }
     }
 

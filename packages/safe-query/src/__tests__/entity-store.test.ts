@@ -251,6 +251,48 @@ describe('EntityStore', () => {
     })
   })
 
+  describe('unregisterQuery', () => {
+    it('removes query from entity-to-query mappings', () => {
+      const store = new EntityStore()
+      store.registerQueryEntities('q1', new Set(['user:1', 'user:2']))
+
+      store.unregisterQuery('q1')
+
+      expect(store.getQueriesForEntity('user', '1')).toEqual(new Set())
+      expect(store.getQueriesForEntity('user', '2')).toEqual(new Set())
+    })
+
+    it('does not affect other queries for the same entity', () => {
+      const store = new EntityStore()
+      store.registerQueryEntities('q1', new Set(['user:1']))
+      store.registerQueryEntities('q2', new Set(['user:1']))
+
+      store.unregisterQuery('q1')
+
+      expect(store.getQueriesForEntity('user', '1')).toEqual(new Set(['q2']))
+    })
+
+    it('is a no-op for an unknown query', () => {
+      const store = new EntityStore()
+      store.registerQueryEntities('q1', new Set(['user:1']))
+
+      store.unregisterQuery('q-unknown')
+
+      expect(store.getQueriesForEntity('user', '1')).toEqual(new Set(['q1']))
+    })
+
+    it('allows re-registration after unregister', () => {
+      const store = new EntityStore()
+      store.registerQueryEntities('q1', new Set(['user:1']))
+      store.unregisterQuery('q1')
+
+      store.registerQueryEntities('q1', new Set(['user:2']))
+
+      expect(store.getQueriesForEntity('user', '1')).toEqual(new Set())
+      expect(store.getQueriesForEntity('user', '2')).toEqual(new Set(['q1']))
+    })
+  })
+
   describe('snapshot/restore', () => {
     it('takes a snapshot and restores it', () => {
       const store = new EntityStore()

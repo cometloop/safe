@@ -161,7 +161,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
       }
     )
 
-    entry.inflightPromise = promise as Promise<SafeResult<any, any>>
+    entry.inflightPromise = promise as Promise<SafeResult<unknown, unknown>>
     notifier.notify(key)
 
     return promise
@@ -209,33 +209,30 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
     return invoke({ params, searchParams })
   }
 
-  // Attach methods
-  invoke.subscribe = subscribe as any
-  invoke.invalidate = invalidate as any
-  invoke.refetch = refetch as any
+  const callable = Object.assign(invoke, { subscribe, invalidate, refetch })
 
   // Attach reactive getters using default key (base path, no params)
   const defaultKey = queryCache.buildKey(path)
-  Object.defineProperty(invoke, 'status', {
+  Object.defineProperty(callable, 'status', {
     get() { return getState(defaultKey).status },
     enumerable: true,
   })
-  Object.defineProperty(invoke, 'data', {
+  Object.defineProperty(callable, 'data', {
     get() { return getState(defaultKey).data },
     enumerable: true,
   })
-  Object.defineProperty(invoke, 'error', {
+  Object.defineProperty(callable, 'error', {
     get() { return getState(defaultKey).error },
     enumerable: true,
   })
-  Object.defineProperty(invoke, 'isFetching', {
+  Object.defineProperty(callable, 'isFetching', {
     get() { return getState(defaultKey).isFetching },
     enumerable: true,
   })
-  Object.defineProperty(invoke, 'isStale', {
+  Object.defineProperty(callable, 'isStale', {
     get() { return getState(defaultKey).isStale },
     enumerable: true,
   })
 
-  return invoke as QueryCallable<TParsed, E, TPath>
+  return callable as QueryCallable<TParsed, E, TPath>
 }

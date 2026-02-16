@@ -5,6 +5,7 @@ export type EntitySnapshot = Map<string, Map<string, unknown>>
 export class EntityStore {
   private entities = new Map<string, Map<string, unknown>>()
   private entityToQueries = new Map<string, Set<string>>()
+  private queryToEntities = new Map<string, Set<string>>()
 
   private entityKey(type: string, id: string): string {
     return `${type}:${id}`
@@ -42,15 +43,18 @@ export class EntityStore {
     queryKey: string,
     entityKeys: Set<string>
   ): Set<string> {
-    const previousKeys = new Set<string>()
+    // O(1) lookup of previous entity keys via reverse index
+    const previousKeys = this.queryToEntities.get(queryKey)
 
-    // Collect previous entity keys for this query and remove old mappings
-    for (const [eKey, queries] of this.entityToQueries) {
-      if (queries.has(queryKey)) {
-        previousKeys.add(eKey)
-        queries.delete(queryKey)
-        if (queries.size === 0) {
-          this.entityToQueries.delete(eKey)
+    // Remove old mappings using the reverse index
+    if (previousKeys) {
+      for (const eKey of previousKeys) {
+        const queries = this.entityToQueries.get(eKey)
+        if (queries) {
+          queries.delete(queryKey)
+          if (queries.size === 0) {
+            this.entityToQueries.delete(eKey)
+          }
         }
       }
     }
@@ -64,6 +68,9 @@ export class EntityStore {
       }
       queries.add(queryKey)
     }
+
+    // Update the reverse index
+    this.queryToEntities.set(queryKey, entityKeys)
 
     return entityKeys
   }
@@ -166,8 +173,25 @@ export class EntityStore {
     }
   }
 
+  unregisterQuery(queryKey: string): void {
+    const entityKeys = this.queryToEntities.get(queryKey)
+    if (entityKeys) {
+      for (const eKey of entityKeys) {
+        const queries = this.entityToQueries.get(eKey)
+        if (queries) {
+          queries.delete(queryKey)
+          if (queries.size === 0) {
+            this.entityToQueries.delete(eKey)
+          }
+        }
+      }
+      this.queryToEntities.delete(queryKey)
+    }
+  }
+
   clear(): void {
     this.entities.clear()
     this.entityToQueries.clear()
+    this.queryToEntities.clear()
   }
 }
