@@ -1,0 +1,74 @@
+{
+  "name": "@cometloop/safe-query",
+  "version": "0.1.0",
+  "description": "Type-safe data fetching and caching layer built on @cometloop/safe",
+  "author": "cometloop",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cometloop/safe.git",
+    "directory": "packages/safe-query"
+  },
+  "homepage": "https://cometloop.github.io/safe/",
+  "bugs": {
+    "url": "https://github.com/cometloop/safe/issues"
+  },
+  "keywords": [
+    "data-fetching",
+    "caching",
+    "typescript",
+    "type-safe",
+    "query",
+    "mutation",
+    "optimistic-updates",
+    "entity-normalization"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint \"**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@cometloop/safe": "workspace:*"
+  },
+  "devDependencies": {
+    "@core/eslint-config": "workspace:*",
+    "@core/typescript-config": "workspace:*",
+    "@vitest/coverage-v8": "^4.0.16",
+    "@vitest/ui": "^4.0.16",
+    "eslint": "^8.57.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.5.4",
+    "vitest": "^4.0.16"
+  }
+}

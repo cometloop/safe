@@ -175,6 +175,37 @@ importers:
         specifier: ^4.0.16
         version: 4.0.18(@vitest/ui@4.0.18)
 
+  packages/safe-query:
+    dependencies:
+      '@cometloop/safe':
+        specifier: workspace:*
+        version: link:../safe
+    devDependencies:
+      '@core/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@core/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@vitest/coverage-v8':
+        specifier: ^4.0.16
+        version: 4.0.18(vitest@4.0.18)
+      '@vitest/ui':
+        specifier: ^4.0.16
+        version: 4.0.18(vitest@4.0.18)
+      eslint:
+        specifier: ^8.57.0
+        version: 8.57.1
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(typescript@5.9.3)
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.16
+        version: 4.0.18(@vitest/ui@4.0.18)
+
   packages/typescript-config: {}
 
 packages:
