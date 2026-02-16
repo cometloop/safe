@@ -146,6 +146,9 @@ export type SafeQueryConfig<E> = {
   staleTime?: number
   gcTime?: number
   enableOptimisticUpdates?: boolean
+  refetchInterval?: number | false
+  refetchIntervalInBackground?: boolean
+  refetchOnWindowFocus?: boolean
 }
 
 // ─── Fn Context Types ───
@@ -179,6 +182,9 @@ export type QueryConfig<TData, TPath extends string = string, TParsed = TData, T
   staleTime?: number
   gcTime?: number
   retry?: RetryConfig
+  refetchInterval?: number | false
+  refetchIntervalInBackground?: boolean
+  refetchOnWindowFocus?: boolean
 } & LifecycleCallbacks<TMapped>
   & ([TMapped] extends [TParsed]
     ? [TParsed] extends [TMapped]

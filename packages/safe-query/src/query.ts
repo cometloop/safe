@@ -4,6 +4,7 @@ import { QueryDisabledError } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
+import type { FocusManager } from './focus-manager'
 
 export type QueryDeps<E> = {
   safeInstance: SafeInstance<E, any>
@@ -12,6 +13,10 @@ export type QueryDeps<E> = {
   notifier: Notifier
   defaultStaleTime: number
   defaultGcTime: number
+  focusManager: FocusManager
+  defaultRefetchInterval: number | false
+  defaultRefetchIntervalInBackground: boolean
+  defaultRefetchOnWindowFocus: boolean
 }
 
 export function createQuery<TData, E, TPath extends string, TParsed = TData, TMapped = TParsed>(
@@ -25,6 +30,10 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     notifier,
     defaultStaleTime,
     defaultGcTime,
+    focusManager,
+    defaultRefetchInterval,
+    defaultRefetchIntervalInBackground,
+    defaultRefetchOnWindowFocus,
   } = deps
 
   const path = config.key
@@ -38,6 +47,13 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
   const configOnSuccess = config.onSuccess
   const configOnError = config.onError
   const configOnSettled = config.onSettled
+
+  const refetchInterval = config.refetchInterval ?? defaultRefetchInterval
+  const refetchIntervalInBackground = config.refetchIntervalInBackground ?? defaultRefetchIntervalInBackground
+  const refetchOnWindowFocus = config.refetchOnWindowFocus ?? defaultRefetchOnWindowFocus
+
+  const intervalTimers = new Map<string, ReturnType<typeof setInterval>>()
+  const focusUnsubs = new Map<string, () => void>()
 
   // When mapToEntities is absent, TMapped = TParsed by type constraint (see QueryConfig).
   // The cast is safe because the conditional type on QueryConfig requires mapToEntities
@@ -206,6 +222,52 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     return promise
   }
 
+  function startInterval(key: string, params?: Record<string, string>, searchParams?: SearchParams): void {
+    if (refetchInterval === false || refetchInterval <= 0) return
+    if (intervalTimers.has(key)) return
+
+    const timer = setInterval(() => {
+      if (queryCache.isDisposed()) return
+      if (!refetchIntervalInBackground && !focusManager.isFocused()) return
+      const entry = queryCache.get(key)
+      if (!entry || entry.subscriberCount <= 0) return
+      invoke({ params, searchParams })
+    }, refetchInterval)
+
+    intervalTimers.set(key, timer)
+  }
+
+  function stopInterval(key: string): void {
+    const timer = intervalTimers.get(key)
+    if (timer !== undefined) {
+      clearInterval(timer)
+      intervalTimers.delete(key)
+    }
+  }
+
+  function startFocusListener(key: string, params?: Record<string, string>, searchParams?: SearchParams): void {
+    if (!refetchOnWindowFocus) return
+    if (focusUnsubs.has(key)) return
+
+    const unsub = focusManager.subscribe(() => {
+      if (queryCache.isDisposed()) return
+      const entry = queryCache.get(key)
+      if (!entry || entry.subscriberCount <= 0) return
+      if (!queryCache.isStale(entry)) return
+      invoke({ params, searchParams })
+    })
+
+    focusUnsubs.set(key, unsub)
+  }
+
+  function stopFocusListener(key: string): void {
+    const unsub = focusUnsubs.get(key)
+    if (unsub) {
+      unsub()
+      focusUnsubs.delete(key)
+    }
+  }
+
   function subscribe(
     callback: (state: QueryState<TMapped, E>) => void,
     options?: { params?: Record<string, string>; searchParams?: SearchParams },
@@ -217,6 +279,12 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     queryCache.getOrCreate(key, staleTime, gcTime)
     queryCache.addSubscriber(key)
 
+    const entry = queryCache.get(key)!
+    if (entry.subscriberCount === 1) {
+      startInterval(key, params, searchParams)
+      startFocusListener(key, params, searchParams)
+    }
+
     const unsub = notifier.subscribe(key, () => {
       callback(getState(key))
     })
@@ -227,6 +295,11 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     return () => {
       unsub()
       queryCache.removeSubscriber(key)
+      const current = queryCache.get(key)
+      if (!current || current.subscriberCount <= 0) {
+        stopInterval(key)
+        stopFocusListener(key)
+      }
     }
   }
 

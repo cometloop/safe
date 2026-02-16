@@ -4,6 +4,7 @@ import { createQuery } from '../query'
 import { QueryCache } from '../query-cache'
 import { EntityStore } from '../entity-store'
 import { Notifier } from '../notifier'
+import { FocusManager } from '../focus-manager'
 
 function createDeps(overrides: Record<string, any> = {}) {
   const safeInstance = createSafe({
@@ -18,6 +19,10 @@ function createDeps(overrides: Record<string, any> = {}) {
     notifier: new Notifier(),
     defaultStaleTime: 0,
     defaultGcTime: 5 * 60_000,
+    focusManager: new FocusManager(),
+    defaultRefetchInterval: false as number | false,
+    defaultRefetchIntervalInBackground: false,
+    defaultRefetchOnWindowFocus: false,
     ...overrides,
   }
 }

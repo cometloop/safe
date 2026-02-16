@@ -678,6 +678,116 @@ describe('createMutation', () => {
     expect(result).toEqual({ id: '1', name: 'Alice', __type: 'user' })
   })
 
+  it('composes safe instance abortAfter signal with user signal', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const fn = vi.fn().mockImplementation((ctx: any) => {
+      capturedSignal = ctx.signal
+      return Promise.resolve({ id: '1', name: 'Alice' })
+    })
+
+    // Create safe instance with abortAfter so it provides a signal
+    const safeInstance = createSafe({
+      parseError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      defaultError: 'Unknown error',
+      abortAfter: 5000,
+    })
+
+    const deps = createDeps({ safeInstance })
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+    }, deps)
+
+    const [result, err] = await mutation({ body: { name: 'Alice' } })
+    expect(err).toBeNull()
+    expect(result).toEqual({ id: '1', name: 'Alice' })
+    // Signal should have been composed from the safe instance's abortAfter signal
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+  })
+
+  it('composes safe instance abortAfter signal with user-provided signal', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const fn = vi.fn().mockImplementation((ctx: any) => {
+      capturedSignal = ctx.signal
+      return new Promise(() => {}) // never resolves
+    })
+
+    const safeInstance = createSafe({
+      parseError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      defaultError: 'Unknown error',
+      abortAfter: 5000,
+    })
+
+    const deps = createDeps({ safeInstance })
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+    }, deps)
+
+    const userController = new AbortController()
+    mutation({ body: { name: 'Alice' }, signal: userController.signal })
+
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    // User signal abort should propagate through the composed signal
+    userController.abort('user cancelled')
+    expect(capturedSignal!.aborted).toBe(true)
+  })
+
+  it('concurrent optimistic mutations: first fails while second in-flight notifies queries', async () => {
+    let reject1: (e: any) => void
+    let resolve2: (v: any) => void
+    const promise1 = new Promise((_, rej) => { reject1 = rej })
+    const promise2 = new Promise((r) => { resolve2 = r })
+
+    let callCount = 0
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return callCount === 1 ? promise1 : promise2
+    })
+
+    const deps = createDeps({ enableOptimisticUpdates: true })
+
+    deps.entityStore.set('user', '1', {
+      id: '1',
+      name: 'Alice',
+      __type: 'user',
+    })
+
+    deps.entityStore.registerQueryEntities(
+      '/users',
+      new Set(['user:1'])
+    )
+
+    const notifyManySpy = vi.spyOn(deps.notifier, 'notifyMany')
+
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
+      method: 'PUT',
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    const p1 = mutation({ params: { id: '1' }, body: { name: 'Bob' } })
+    const p2 = mutation({ params: { id: '1' }, body: { name: 'Charlie' } })
+
+    // First fails while second is still in-flight (counter > 0, no rollback yet)
+    notifyManySpy.mockClear()
+    reject1!(new Error('Server error'))
+    await p1
+
+    // Should have notified affected queries even though no rollback (counter still > 0)
+    expect(notifyManySpy).toHaveBeenCalled()
+
+    // Now resolve second to clean up
+    resolve2!({ id: '1', name: 'Charlie', __type: 'user' })
+    await p2
+  })
+
   it('concurrent mutations: second fails, rolls back to base when all settle', async () => {
     let resolve1: (v: any) => void
     let reject2: (e: any) => void

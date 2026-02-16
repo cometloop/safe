@@ -8,6 +8,7 @@ import type {
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
+import { FocusManager } from './focus-manager'
 import { createQuery } from './query'
 import { createMutation } from './mutation'
 
@@ -48,11 +49,15 @@ export function safeQuery<E>(
     enableOptimisticUpdates = false,
     staleTime = 0,
     gcTime = 5 * 60_000,
+    refetchInterval = false,
+    refetchIntervalInBackground = false,
+    refetchOnWindowFocus = false,
   } = config
 
   const entityStore = new EntityStore()
   const queryCache = new QueryCache(staleTime, gcTime, (key) => entityStore.unregisterQuery(key))
   const notifier = new Notifier()
+  const focusManager = new FocusManager()
   let disposed = false
 
   function assertNotDisposed(): void {
@@ -73,6 +78,10 @@ export function safeQuery<E>(
         notifier,
         defaultStaleTime: staleTime,
         defaultGcTime: gcTime,
+        focusManager,
+        defaultRefetchInterval: refetchInterval,
+        defaultRefetchIntervalInBackground: refetchIntervalInBackground,
+        defaultRefetchOnWindowFocus: refetchOnWindowFocus,
       })
     },
 
@@ -129,6 +138,7 @@ export function safeQuery<E>(
       queryCache.destroy()
       entityStore.clear()
       notifier.clear()
+      focusManager.destroy()
     },
   }
 }

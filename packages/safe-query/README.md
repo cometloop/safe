@@ -398,6 +398,59 @@ const url = buildUrl('https://api.example.com', '/users/:id', { id: '1' }, { pag
 // → 'https://api.example.com/users/1?page=2'
 ```
 
+## Background Refetching
+
+Queries can automatically refetch in the background on a timer or when the browser tab regains focus. Both are opt-in and only active while a query has subscribers.
+
+### `refetchInterval`
+
+Periodically refetch a query on a timer:
+
+```typescript
+const api = safeQuery<AppError>({
+  safe,
+  refetchInterval: 30_000, // refetch all queries every 30s (global default)
+})
+
+// Or per-query — overrides the global default
+const getNotifications = api.query({
+  key: '/notifications',
+  fn: () => fetchJson<Notification[]>('/api/notifications'),
+  refetchInterval: 5_000, // poll every 5s
+})
+```
+
+By default, interval refetching pauses when the browser tab is hidden. Set `refetchIntervalInBackground` to keep polling:
+
+```typescript
+const api = safeQuery<AppError>({
+  safe,
+  refetchInterval: 10_000,
+  refetchIntervalInBackground: true, // keep polling even when tab is hidden
+})
+```
+
+### `refetchOnWindowFocus`
+
+Refetch stale queries when the user returns to the tab:
+
+```typescript
+const api = safeQuery<AppError>({
+  safe,
+  staleTime: 30_000,
+  refetchOnWindowFocus: true, // refetch stale queries on tab focus
+})
+
+// Or per-query
+const getUsers = api.query({
+  key: '/users',
+  fn: () => fetchJson<User[]>('/api/users'),
+  refetchOnWindowFocus: true,
+})
+```
+
+Fresh queries (within their `staleTime`) are not refetched on focus — only stale ones.
+
 ## Configuration
 
 | Option | Default | Description |
@@ -405,8 +458,50 @@ const url = buildUrl('https://api.example.com', '/users/:id', { id: '1' }, { pag
 | `staleTime` | `0` | Ms before cached data is considered stale |
 | `gcTime` | `300000` | Ms before unused cache entries are garbage collected |
 | `enableOptimisticUpdates` | `false` | Enable optimistic mutations |
+| `refetchInterval` | `false` | Ms between automatic refetches, `false` to disable |
+| `refetchIntervalInBackground` | `false` | Continue interval refetching when the tab is hidden |
+| `refetchOnWindowFocus` | `false` | Refetch stale queries when the tab regains focus |
 
-`staleTime`, `gcTime`, and `retry` can be overridden per-query/mutation.
+`staleTime`, `gcTime`, `retry`, `refetchInterval`, `refetchIntervalInBackground`, and `refetchOnWindowFocus` can be overridden per-query.
+
+### Choosing a `staleTime`
+
+The default `staleTime` of `0` means every query call triggers a refetch. This is the safest default — it guarantees fresh data — but for most apps you'll want to set a global override and tune per-query where needed.
+
+A good starting point is **30–60 seconds** at the client level. This eliminates redundant fetches from rapid navigation (back/forward, tab switching) while still keeping data fresh enough for most UIs.
+
+```typescript
+const api = safeQuery<AppError>({
+  safe,
+  staleTime: 30_000, // 30s — good default for most apps
+})
+```
+
+Then override per-query based on how frequently the data changes:
+
+| Data type | `staleTime` | Why |
+|-----------|-------------|-----|
+| User session / auth | `Infinity` | Only changes on explicit action |
+| Reference data (countries, categories) | `5–10 min` | Rarely changes |
+| List views (feeds, search results) | `30s–2 min` | Balance freshness vs. network cost |
+| Detail views | `30s–1 min` | Likely revisited quickly |
+| Real-time data (notifications, chat) | `0` | Always needs to be fresh |
+
+```typescript
+// Reference data — cache for 10 minutes
+const getCountries = api.query({
+  key: '/countries',
+  fn: () => fetchJson<Country[]>('/api/countries'),
+  staleTime: 10 * 60_000,
+})
+
+// Real-time data — always refetch
+const getNotifications = api.query({
+  key: '/notifications',
+  fn: () => fetchJson<Notification[]>('/api/notifications'),
+  staleTime: 0,
+})
+```
 
 ### Client Methods
 
