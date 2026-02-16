@@ -23,10 +23,11 @@ export function createMutation<
     | 'PATCH'
     | 'DELETE',
   TParsed = TData,
+  TMapped = TParsed,
 >(
-  config: MutationConfig<TData, TBody, TPath, TMethod, TParsed>,
+  config: MutationConfig<TData, TBody, TPath, TMethod, TParsed, TMapped>,
   deps: MutationDeps<E>
-): MutationCallable<TParsed, E, TPath, TBody> {
+): MutationCallable<TMapped, E, TPath, TBody> {
   const {
     safeInstance,
     queryCache,
@@ -37,12 +38,17 @@ export function createMutation<
 
   const method = config.method
   const parseResponse = config.parseResponse
+  const mapToEntities = config.mapToEntities
   const entities = config.entities
   const retry = config.retry
   const optimisticConfig = config.optimistic
   const configOnSuccess = config.onSuccess
   const configOnError = config.onError
   const configOnSettled = config.onSettled
+
+  const combinedParse: ((data: TData) => TMapped) | undefined = mapToEntities
+    ? (data: TData) => mapToEntities((parseResponse ? parseResponse(data) : data) as TParsed)
+    : parseResponse as unknown as ((data: TData) => TMapped) | undefined
 
   function resolveOptimistic(params?: Record<string, string>): {
     entityType: string
@@ -76,7 +82,7 @@ export function createMutation<
     return { entityType, entityId }
   }
 
-  function invoke(options: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; body?: unknown } & LifecycleCallbacks<TParsed, E>): Promise<SafeResult<TParsed, E>> {
+  function invoke(options: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; body?: unknown } & LifecycleCallbacks<TMapped, E>): Promise<SafeResult<TMapped, E>> {
     const params = options?.params
     const body = options?.body
     const invokeOnSuccess = options?.onSuccess
@@ -112,7 +118,7 @@ export function createMutation<
       notifier.notifyMany(affectedQueryKeys)
     }
 
-    return safeInstance.async<TData, TParsed>(
+    return safeInstance.async<TData, TMapped>(
       (signal) => {
         const context = { ...options }
         if (signal || options?.signal) {
@@ -137,9 +143,7 @@ export function createMutation<
         return config.fn(context as MutationFnContext<TPath, TBody>)
       },
       {
-        parseResult: parseResponse as
-          | ((response: TData) => TParsed)
-          | undefined,
+        parseResult: combinedParse,
         retry,
         onSuccess: (result) => {
           // End optimistic tracking as success
@@ -192,12 +196,12 @@ export function createMutation<
           invokeOnError?.(error as E)
         },
         onSettled: (result, error) => {
-          configOnSettled?.(result as TParsed | undefined, error as E | null)
-          invokeOnSettled?.(result as TParsed | undefined, error as E | null)
+          configOnSettled?.(result as TMapped | undefined, error as E | null)
+          invokeOnSettled?.(result as TMapped | undefined, error as E | null)
         },
       }
     )
   }
 
-  return invoke as MutationCallable<TParsed, E, TPath, TBody>
+  return invoke as MutationCallable<TMapped, E, TPath, TBody>
 }

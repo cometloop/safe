@@ -610,6 +610,74 @@ describe('createMutation', () => {
     expect(entity.email).toBe('bob@test.com')
   })
 
+  it('mapToEntities transforms data and entities are normalized', async () => {
+    type ApiUser = { type: string; id: string; name: string }
+    type NormalizedUser = ApiUser & { __type: 'user' }
+
+    const fn = vi.fn().mockResolvedValue({ type: 'user', id: '1', name: 'Alice' })
+
+    const deps = createDeps()
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+      mapToEntities: (data: ApiUser): NormalizedUser => ({ ...data, __type: 'user' as const }),
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    const [result, err] = await mutation({ body: { name: 'Alice' } })
+    expect(err).toBeNull()
+    expect(result).toEqual({ type: 'user', id: '1', name: 'Alice', __type: 'user' })
+
+    expect(deps.entityStore.get('user', '1')).toEqual(
+      expect.objectContaining({ id: '1', name: 'Alice', __type: 'user' })
+    )
+  })
+
+  it('mapToEntities composes with parseResponse in mutation', async () => {
+    type RawResponse = { data: { type: string; id: string; name: string } }
+    type ApiUser = { type: string; id: string; name: string }
+    type NormalizedUser = ApiUser & { __type: 'user' }
+
+    const fn = vi.fn().mockResolvedValue({
+      data: { type: 'user', id: '1', name: 'Alice' },
+    })
+
+    const deps = createDeps()
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+      parseResponse: (raw: RawResponse): ApiUser => raw.data,
+      mapToEntities: (data: ApiUser): NormalizedUser => ({ ...data, __type: 'user' as const }),
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    const [result, err] = await mutation({ body: { name: 'Alice' } })
+    expect(err).toBeNull()
+    expect(result).toEqual({ type: 'user', id: '1', name: 'Alice', __type: 'user' })
+
+    expect(deps.entityStore.get('user', '1')).toEqual(
+      expect.objectContaining({ id: '1', name: 'Alice', __type: 'user' })
+    )
+  })
+
+  it('mapToEntities without entities still transforms mutation data', async () => {
+    const fn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice' })
+
+    const deps = createDeps()
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+      mapToEntities: (data: any) => ({ ...data, __type: 'user' as const }),
+    }, deps)
+
+    const [result, err] = await mutation({ body: { name: 'Alice' } })
+    expect(err).toBeNull()
+    expect(result).toEqual({ id: '1', name: 'Alice', __type: 'user' })
+  })
+
   it('concurrent mutations: second fails, rolls back to base when all settle', async () => {
     let resolve1: (v: any) => void
     let reject2: (e: any) => void

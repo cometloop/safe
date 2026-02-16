@@ -619,4 +619,110 @@ describe('createQuery', () => {
 
     warnSpy.mockRestore()
   })
+
+  it('mapToEntities transforms data and entities are normalized', async () => {
+    type ApiUser = { type: string; id: string; name: string }
+    type NormalizedUser = ApiUser & { __type: 'user' }
+
+    const apiUsers: ApiUser[] = [
+      { type: 'user', id: '1', name: 'Alice' },
+      { type: 'user', id: '2', name: 'Bob' },
+    ]
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve(apiUsers),
+      mapToEntities: (users): NormalizedUser[] =>
+        users.map(u => ({ ...u, __type: 'user' as const })),
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    const [result, err] = await query()
+    expect(err).toBeNull()
+    expect(result).toEqual([
+      { type: 'user', id: '1', name: 'Alice', __type: 'user' },
+      { type: 'user', id: '2', name: 'Bob', __type: 'user' },
+    ])
+
+    expect(deps.entityStore.get('user', '1')).toEqual(
+      expect.objectContaining({ id: '1', name: 'Alice', __type: 'user' })
+    )
+    expect(deps.entityStore.get('user', '2')).toEqual(
+      expect.objectContaining({ id: '2', name: 'Bob', __type: 'user' })
+    )
+  })
+
+  it('mapToEntities composes with parseResponse', async () => {
+    type RawResponse = { data: { type: string; id: string; name: string }[] }
+    type ApiUser = { type: string; id: string; name: string }
+    type NormalizedUser = ApiUser & { __type: 'user' }
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: (): Promise<RawResponse> => Promise.resolve({
+        data: [{ type: 'user', id: '1', name: 'Alice' }],
+      }),
+      parseResponse: (raw: RawResponse): ApiUser[] => raw.data,
+      mapToEntities: (users): NormalizedUser[] =>
+        users.map(u => ({ ...u, __type: 'user' as const })),
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    const [result, err] = await query()
+    expect(err).toBeNull()
+    expect(result).toEqual([
+      { type: 'user', id: '1', name: 'Alice', __type: 'user' },
+    ])
+
+    expect(deps.entityStore.get('user', '1')).toEqual(
+      expect.objectContaining({ id: '1', name: 'Alice', __type: 'user' })
+    )
+  })
+
+  it('mapToEntities without entities still transforms data', async () => {
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
+      mapToEntities: (users) =>
+        users.map(u => ({ ...u, __type: 'user' as const })),
+    }, deps)
+
+    const [result, err] = await query()
+    expect(err).toBeNull()
+    expect(result).toEqual([{ id: '1', name: 'Alice', __type: 'user' }])
+  })
+
+  it('subscribers receive mapToEntities-transformed data', async () => {
+    type ApiUser = { type: string; id: string; name: string }
+    type NormalizedUser = ApiUser & { __type: 'user' }
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: (): Promise<ApiUser[]> => Promise.resolve([
+        { type: 'user', id: '1', name: 'Alice' },
+      ]),
+      mapToEntities: (users): NormalizedUser[] =>
+        users.map(u => ({ ...u, __type: 'user' as const })),
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    })
+
+    await query()
+
+    const lastState = states[states.length - 1]
+    expect(lastState.status).toBe('success')
+    expect(lastState.data).toEqual([
+      { type: 'user', id: '1', name: 'Alice', __type: 'user' },
+    ])
+
+    unsub()
+  })
 })

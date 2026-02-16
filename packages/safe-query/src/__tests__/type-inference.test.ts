@@ -187,6 +187,30 @@ describe('Type inference', () => {
     }
   })
 
+  it('query with mapToEntities returns TMapped type', async () => {
+    type ApiUser = { type: string; id: string; name: string }
+    type NormalizedUser = { __type: 'user'; id: string; name: string; type: string }
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn: (): Promise<ApiUser[]> =>
+        Promise.resolve([{ type: 'user', id: '1', name: 'Alice' }]),
+      mapToEntities: (users): NormalizedUser[] =>
+        users.map(u => ({ ...u, __type: 'user' as const })),
+      entities: {
+        user: (u: NormalizedUser) => u.id,
+      },
+    })
+
+    const [users, err] = await usersQuery()
+    if (!err) {
+      // users is typed as NormalizedUser[]
+      const first: NormalizedUser | undefined = users[0]
+      expect(first?.__type).toBe('user')
+      expect(first?.name).toBe('Alice')
+    }
+  })
+
   it('subscribe state is typed with TData and TError', async () => {
     const usersQuery = api.query({
       key: '/users',

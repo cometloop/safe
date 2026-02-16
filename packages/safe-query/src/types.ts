@@ -164,15 +164,16 @@ export type LifecycleCallbacks<TData, TError = unknown> = {
 
 // ─── Query Config ───
 
-export type QueryConfig<TData, TPath extends string = string, TParsed = TData> = {
+export type QueryConfig<TData, TPath extends string = string, TParsed = TData, TMapped = TParsed> = {
   key: TPath
   fn: (context: QueryFnContext<TPath>) => Promise<TData>
   parseResponse?: (data: TData) => TParsed
-  entities?: EntityExtractors<TParsed>
+  mapToEntities?: (data: TParsed) => TMapped
+  entities?: EntityExtractors<TMapped>
   staleTime?: number
   gcTime?: number
   retry?: RetryConfig
-} & LifecycleCallbacks<TParsed>
+} & LifecycleCallbacks<TMapped>
 
 // ─── Mutation Config ───
 
@@ -193,15 +194,17 @@ export type MutationConfig<
     | 'PATCH'
     | 'DELETE',
   TParsed = TData,
+  TMapped = TParsed,
 > = {
   key: TPath
   fn: (context: MutationFnContext<TPath, TBody>) => Promise<TData>
   method?: TMethod
   parseResponse?: (data: TData) => TParsed
-  entities?: EntityExtractors<TParsed>
+  mapToEntities?: (data: TParsed) => TMapped
+  entities?: EntityExtractors<TMapped>
   optimistic?: OptimisticConfig<TPath>
   retry?: RetryConfig
-} & LifecycleCallbacks<TParsed>
+} & LifecycleCallbacks<TMapped>
 
 // ─── Invoke Options ───
 

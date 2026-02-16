@@ -281,21 +281,62 @@ const getUsers = api.query({
   fn: (): Promise<User[]> => fetch('/api/users').then(r => r.json()),
   entities: { user: (u) => u.id },
 })
+```
 
-// If not, use parseResponse to tag them
+### `mapToEntities`
+
+Use `mapToEntities` to add `__type` tags before normalization. This keeps `parseResponse` for shaping data and `mapToEntities` for entity concerns:
+
+```typescript
+type ApiUser = { type: string; id: string; name: string }
+type NormalizedUser = ApiUser & { __type: 'user' }
+
+const getUsers = api.query({
+  key: '/users',
+  fn: (): Promise<ApiUser[]> => fetch('/api/users').then(r => r.json()),
+  mapToEntities: (users): NormalizedUser[] =>
+    users.map(u => ({ ...u, __type: 'user' as const })),
+  entities: { user: (u: NormalizedUser) => u.id },
+})
+```
+
+`mapToEntities` composes with `parseResponse` — the data flows through `parseResponse` first, then `mapToEntities`:
+
+```typescript
+type RawResponse = { data: ApiPost[] }
+type ApiPost = { id: string; title: string; author: { id: string; name: string } }
+
 const getPosts = api.query({
   key: '/posts',
   fn: () => fetch('/api/posts').then(r => r.json()),
-  parseResponse: (data: Post[]) =>
-    data.map((post) => ({
+  // Step 1: unwrap the response envelope
+  parseResponse: (raw: RawResponse) => raw.data,
+  // Step 2: tag entities for normalization
+  mapToEntities: (posts) =>
+    posts.map(post => ({
       ...post,
       __type: 'post' as const,
       author: { ...post.author, __type: 'user' as const },
     })),
   entities: {
     post: (p) => p.id,
-    user: (u) => u.userId,
+    user: (u) => u.id,
   },
+})
+```
+
+The same option works on mutations:
+
+```typescript
+const createUser = api.mutate<ApiUser, CreateUserInput>({
+  key: '/users',
+  fn: ({ body }) => fetch('/api/users', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }).then(r => r.json()),
+  method: 'POST',
+  mapToEntities: (user): NormalizedUser => ({ ...user, __type: 'user' as const }),
+  entities: { user: (u: NormalizedUser) => u.id },
 })
 ```
 

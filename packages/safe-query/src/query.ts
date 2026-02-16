@@ -13,10 +13,10 @@ export type QueryDeps<E> = {
   defaultGcTime: number
 }
 
-export function createQuery<TData, E, TPath extends string, TParsed = TData>(
-  config: QueryConfig<TData, TPath, TParsed>,
+export function createQuery<TData, E, TPath extends string, TParsed = TData, TMapped = TParsed>(
+  config: QueryConfig<TData, TPath, TParsed, TMapped>,
   deps: QueryDeps<E>
-): QueryCallable<TParsed, E, TPath> {
+): QueryCallable<TMapped, E, TPath> {
   const {
     safeInstance,
     queryCache,
@@ -31,11 +31,16 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
   const staleTime = config.staleTime ?? defaultStaleTime
   const gcTime = config.gcTime ?? defaultGcTime
   const parseResponse = config.parseResponse
+  const mapToEntities = config.mapToEntities
   const entities = config.entities
   const retry = config.retry
   const configOnSuccess = config.onSuccess
   const configOnError = config.onError
   const configOnSettled = config.onSettled
+
+  const combinedParse: ((data: TData) => TMapped) | undefined = mapToEntities
+    ? (data: TData) => mapToEntities((parseResponse ? parseResponse(data) : data) as TParsed)
+    : parseResponse as unknown as ((data: TData) => TMapped) | undefined
 
   const hasParams = path.includes(':')
   let warnedDefaultKey = false
@@ -50,7 +55,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
     }
   }
 
-  function getState(key: string): QueryState<TParsed, E> {
+  function getState(key: string): QueryState<TMapped, E> {
     const entry = queryCache.get(key)
     if (!entry) {
       return {
@@ -63,11 +68,11 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
       }
     }
 
-    let data: TParsed | undefined
+    let data: TMapped | undefined
     if (entry.normalizedData !== undefined && entities) {
-      data = entityStore.denormalize(entry.normalizedData) as TParsed
+      data = entityStore.denormalize(entry.normalizedData) as TMapped
     } else {
-      data = entry.data as TParsed | undefined
+      data = entry.data as TMapped | undefined
     }
 
     const isStale = queryCache.isStale(entry)
@@ -90,7 +95,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
     }
   }
 
-  function invoke(options?: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean } & LifecycleCallbacks<TParsed, E>): Promise<SafeResult<TParsed, E>> {
+  function invoke(options?: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean } & LifecycleCallbacks<TMapped, E>): Promise<SafeResult<TMapped, E>> {
     // Skip fetch when disabled
     if (options?.enabled === false) {
       const params = options?.params
@@ -99,9 +104,9 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
       const entry = queryCache.get(key)
       if (entry?.data !== undefined) {
         const state = getState(key)
-        return Promise.resolve([state.data!, null] as unknown as SafeResult<TParsed, E>)
+        return Promise.resolve([state.data!, null] as unknown as SafeResult<TMapped, E>)
       }
-      return safeInstance.async<TParsed>(() => { throw new Error('Query is disabled') })
+      return safeInstance.async<TMapped>(() => { throw new Error('Query is disabled') })
     }
 
     const invokeOnSuccess = options?.onSuccess
@@ -116,12 +121,12 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
     // Return cached data if fresh
     if (!queryCache.isStale(entry) && entry.data !== undefined) {
       const state = getState(key)
-      return Promise.resolve([state.data!, null] as unknown as SafeResult<TParsed, E>)
+      return Promise.resolve([state.data!, null] as unknown as SafeResult<TMapped, E>)
     }
 
     // Deduplication: return inflight promise
     if (entry.inflightPromise) {
-      return entry.inflightPromise as Promise<SafeResult<TParsed, E>>
+      return entry.inflightPromise as Promise<SafeResult<TMapped, E>>
     }
 
     const generation = ++entry.generation
@@ -140,16 +145,14 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
       }
     }
 
-    const promise = safeInstance.async<TData, TParsed>(
+    const promise = safeInstance.async<TData, TMapped>(
       () => {
         const context: Record<string, unknown> = { ...options }
         context.signal = controller.signal
         return fn(context as QueryFnContext<TPath>)
       },
       {
-        parseResult: parseResponse as
-          | ((response: TData) => TParsed)
-          | undefined,
+        parseResult: combinedParse,
         retry,
         onSuccess: (result) => {
           // Check generation to discard stale responses
@@ -196,7 +199,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
   }
 
   function subscribe(
-    callback: (state: QueryState<TParsed, E>) => void,
+    callback: (state: QueryState<TMapped, E>) => void,
     options?: { params?: Record<string, string>; searchParams?: SearchParams },
   ): () => void {
     const params = options?.params
@@ -228,7 +231,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
     notifier.notify(key)
   }
 
-  function refetch(options?: { params?: Record<string, string>; searchParams?: SearchParams }): Promise<SafeResult<TParsed, E>> {
+  function refetch(options?: { params?: Record<string, string>; searchParams?: SearchParams }): Promise<SafeResult<TMapped, E>> {
     const params = options?.params
     const searchParams = options?.searchParams
 
@@ -262,5 +265,5 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData>(
     enumerable: true,
   })
 
-  return callable as QueryCallable<TParsed, E, TPath>
+  return callable as QueryCallable<TMapped, E, TPath>
 }

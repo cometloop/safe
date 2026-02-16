@@ -12,9 +12,9 @@ import { createQuery } from './query'
 import { createMutation } from './mutation'
 
 export type SafeQueryClient<E> = {
-  query: <TData, TPath extends string = string, TParsed = TData>(
-    config: QueryConfig<TData, TPath, TParsed>
-  ) => QueryCallable<TParsed, E, TPath>
+  query: <TData, TPath extends string = string, TParsed = TData, TMapped = TParsed>(
+    config: QueryConfig<TData, TPath, TParsed, TMapped>
+  ) => QueryCallable<TMapped, E, TPath>
   mutate: <
     TData = void,
     TBody = void,
@@ -25,10 +25,11 @@ export type SafeQueryClient<E> = {
       | 'PATCH'
       | 'DELETE',
     TParsed = TData,
+    TMapped = TParsed,
   >(
-    config: MutationConfig<TData, TBody, TPath, TMethod, TParsed>
+    config: MutationConfig<TData, TBody, TPath, TMethod, TParsed, TMapped>
   ) => MutationCallable<
-    TParsed,
+    TMapped,
     E,
     TPath,
     TBody
@@ -61,11 +62,11 @@ export function safeQuery<E>(
   }
 
   return {
-    query: <TData, TPath extends string = string, TParsed = TData>(
-      queryConfig: QueryConfig<TData, TPath, TParsed>
+    query: <TData, TPath extends string = string, TParsed = TData, TMapped = TParsed>(
+      queryConfig: QueryConfig<TData, TPath, TParsed, TMapped>
     ) => {
       assertNotDisposed()
-      return createQuery<TData, E, TPath, TParsed>(queryConfig, {
+      return createQuery<TData, E, TPath, TParsed, TMapped>(queryConfig, {
         safeInstance,
         queryCache,
         entityStore,
@@ -85,11 +86,12 @@ export function safeQuery<E>(
         | 'PATCH'
         | 'DELETE',
       TParsed = TData,
+      TMapped = TParsed,
     >(
-      mutationConfig: MutationConfig<TData, TBody, TPath, TMethod, TParsed>
+      mutationConfig: MutationConfig<TData, TBody, TPath, TMethod, TParsed, TMapped>
     ) => {
       assertNotDisposed()
-      return createMutation<TData, TBody, E, TPath, TMethod, TParsed>(mutationConfig, {
+      return createMutation<TData, TBody, E, TPath, TMethod, TParsed, TMapped>(mutationConfig, {
         safeInstance,
         queryCache,
         entityStore,
