@@ -102,6 +102,12 @@ export type CacheEntry<TData> = {
   entityKeys: Set<string>
 }
 
+// ─── Search Params ───
+
+export type SearchParamValue = string | number | boolean
+
+export type SearchParams = Record<string, SearchParamValue | SearchParamValue[]>
+
 // ─── HTTP Types ───
 
 export class HttpError extends Error {
@@ -177,34 +183,52 @@ export type MutationConfig<
 
 // ─── Query Object ───
 
+export type QueryExecuteOptions = {
+  signal?: AbortSignal
+  searchParams?: SearchParams
+}
+
 export type QueryObject<TData, TError, TPath extends string> =
   [HasPathParams<TPath>] extends [true]
     ? {
         execute: (
           params: PathParams<TPath>,
-          options?: { signal?: AbortSignal }
+          options?: QueryExecuteOptions
         ) => Promise<SafeResult<TData, TError>>
         subscribe: (
           params: PathParams<TPath>,
-          callback: (state: QueryState<TData, TError>) => void
+          callback: (state: QueryState<TData, TError>) => void,
+          options?: { searchParams?: SearchParams }
         ) => () => void
-        invalidate: (params: PathParams<TPath>) => void
+        invalidate: (
+          params: PathParams<TPath>,
+          options?: { searchParams?: SearchParams }
+        ) => void
         refetch: (
-          params: PathParams<TPath>
+          params: PathParams<TPath>,
+          options?: { searchParams?: SearchParams }
         ) => Promise<SafeResult<TData, TError>>
       }
     : {
-        execute: (options?: {
-          signal?: AbortSignal
-        }) => Promise<SafeResult<TData, TError>>
+        execute: (
+          options?: QueryExecuteOptions
+        ) => Promise<SafeResult<TData, TError>>
         subscribe: (
-          callback: (state: QueryState<TData, TError>) => void
+          callback: (state: QueryState<TData, TError>) => void,
+          options?: { searchParams?: SearchParams }
         ) => () => void
-        invalidate: () => void
-        refetch: () => Promise<SafeResult<TData, TError>>
+        invalidate: (options?: { searchParams?: SearchParams }) => void
+        refetch: (options?: {
+          searchParams?: SearchParams
+        }) => Promise<SafeResult<TData, TError>>
       }
 
 // ─── Mutation Object ───
+
+export type MutationExecuteOptions = {
+  signal?: AbortSignal
+  searchParams?: SearchParams
+}
 
 export type MutationObject<
   TData,
@@ -218,13 +242,13 @@ export type MutationObject<
         execute: (
           params: PathParams<TPath>,
           body: TBody,
-          options?: { signal?: AbortSignal }
+          options?: MutationExecuteOptions
         ) => Promise<SafeResult<TData, TError>>
       }
     : {
         execute: (
           body: TBody,
-          options?: { signal?: AbortSignal }
+          options?: MutationExecuteOptions
         ) => Promise<SafeResult<TData, TError>>
       }
 

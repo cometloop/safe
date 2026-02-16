@@ -156,6 +156,49 @@ describe('Type inference', () => {
     }
   })
 
+  it('query execute accepts searchParams in options', async () => {
+    mockFetch([{ id: '1', name: 'Alice', email: 'alice@test.com' }])
+
+    const usersQuery = api.query<User[]>('/users')
+    const [users, err] = await usersQuery.execute({
+      searchParams: { search: 'alice', page: 1 },
+    })
+
+    if (!err) {
+      expect(users.length).toBe(1)
+    }
+  })
+
+  it('query with path params accepts searchParams in options', async () => {
+    mockFetch([{ id: 'p1', title: 'Hello' }])
+
+    const postsQuery = api.query('/users/:id/posts')
+    const [posts, err] = await postsQuery.execute(
+      { id: 'u1' },
+      { searchParams: { page: 1, limit: 10 } }
+    )
+
+    expect(err).toBeNull()
+    expect(posts).toBeDefined()
+  })
+
+  it('mutation accepts searchParams in options', async () => {
+    mockFetch({ id: '1', name: 'Alice', email: 'alice@test.com' })
+
+    const createUser = api.mutate<User, CreateUserInput>('/users', {
+      method: 'POST',
+    })
+
+    const [user, err] = await createUser.execute(
+      { name: 'Alice', email: 'alice@test.com' },
+      { searchParams: { dryRun: true } }
+    )
+
+    if (!err) {
+      expect(user.name).toBe('Alice')
+    }
+  })
+
   it('subscribe state is typed with TData and TError', async () => {
     mockFetch([{ id: '1', name: 'Alice', email: 'alice@test.com' }])
 

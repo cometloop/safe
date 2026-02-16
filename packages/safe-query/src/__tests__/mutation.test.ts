@@ -505,6 +505,45 @@ describe('createMutation', () => {
     await executePromise
   })
 
+  it('appends search params to mutation URL', async () => {
+    const response = { id: '1', name: 'Alice' }
+    mockFetchResponse(response, 201)
+
+    const deps = createDeps()
+    const mutation = createMutation('/users', { method: 'POST' }, deps)
+
+    const [result, err] = await mutation.execute(
+      { name: 'Alice' },
+      { searchParams: { dryRun: true } }
+    )
+    expect(err).toBeNull()
+    expect(result).toEqual(response)
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.example.com/users?dryRun=true',
+      expect.objectContaining({ method: 'POST' })
+    )
+  })
+
+  it('appends search params to mutation URL with path params', async () => {
+    const response = { id: '123', name: 'Updated' }
+    mockFetchResponse(response)
+
+    const deps = createDeps()
+    const mutation = createMutation('/users/:id', { method: 'PUT' }, deps)
+
+    const [result, err] = await mutation.execute(
+      { id: '123' },
+      { name: 'Updated' },
+      { searchParams: { notify: true } }
+    )
+    expect(err).toBeNull()
+    expect(result).toEqual(response)
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.example.com/users/123?notify=true',
+      expect.objectContaining({ method: 'PUT' })
+    )
+  })
+
   it('rolls back optimistic delete on error', async () => {
     vi.stubGlobal(
       'fetch',

@@ -48,4 +48,79 @@ describe('buildUrl', () => {
       'https://api.example.com/users/:id'
     )
   })
+
+  describe('search params', () => {
+    it('appends search params as query string', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users', undefined, {
+          search: 'foo',
+          page: 2,
+        })
+      ).toBe('https://api.example.com/users?page=2&search=foo')
+    })
+
+    it('handles boolean search params', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users', undefined, {
+          active: true,
+        })
+      ).toBe('https://api.example.com/users?active=true')
+    })
+
+    it('handles array search params by repeating keys', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users', undefined, {
+          tag: ['a', 'b', 'c'],
+        })
+      ).toBe('https://api.example.com/users?tag=a&tag=b&tag=c')
+    })
+
+    it('encodes search param values', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users', undefined, {
+          q: 'hello world',
+        })
+      ).toBe('https://api.example.com/users?q=hello%20world')
+    })
+
+    it('encodes search param keys', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users', undefined, {
+          'my key': 'value',
+        })
+      ).toBe('https://api.example.com/users?my%20key=value')
+    })
+
+    it('combines path params and search params', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users/:id', { id: '123' }, {
+          page: 1,
+        })
+      ).toBe('https://api.example.com/users/123?page=1')
+    })
+
+    it('sorts search params alphabetically', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users', undefined, {
+          z: '1',
+          a: '2',
+          m: '3',
+        })
+      ).toBe('https://api.example.com/users?a=2&m=3&z=1')
+    })
+
+    it('handles empty search params object', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users', undefined, {})
+      ).toBe('https://api.example.com/users')
+    })
+
+    it('handles empty array in search params', () => {
+      expect(
+        buildUrl('https://api.example.com', '/users', undefined, {
+          tags: [],
+        })
+      ).toBe('https://api.example.com/users')
+    })
+  })
 })

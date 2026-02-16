@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { QueryConfig, QueryState } from './types'
+import type { QueryConfig, QueryState, SearchParams } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
@@ -79,11 +79,23 @@ export function createQuery<TData, E, TPath extends string>(
     }
   }
 
+  const hasPathParams = path.includes(':')
+
   function executeInner(
-    params?: Record<string, string>,
-    options?: { signal?: AbortSignal }
+    ...args: any[]
   ): Promise<SafeResult<TData, E>> {
-    const key = queryCache.buildKey(path, params)
+    let params: Record<string, string> | undefined
+    let options: { signal?: AbortSignal; searchParams?: SearchParams } | undefined
+
+    if (hasPathParams) {
+      params = args[0]
+      options = args[1]
+    } else {
+      options = args[0]
+    }
+
+    const searchParams = options?.searchParams
+    const key = queryCache.buildKey(path, params, searchParams)
     const entry = queryCache.getOrCreate(key, staleTime, gcTime)
 
     // Return cached data if fresh
@@ -98,7 +110,7 @@ export function createQuery<TData, E, TPath extends string>(
     }
 
     const generation = ++entry.generation
-    const url = buildUrl(baseUrl, path, params)
+    const url = buildUrl(baseUrl, path, params, searchParams)
 
     // Notify loading state
     entry.inflightPromise = {} as any // placeholder to indicate fetching
@@ -154,19 +166,29 @@ export function createQuery<TData, E, TPath extends string>(
     paramsOrCallback:
       | Record<string, string>
       | ((state: QueryState<TData, E>) => void),
-    maybeCallback?: (state: QueryState<TData, E>) => void
+    maybeCallbackOrOptions?:
+      | ((state: QueryState<TData, E>) => void)
+      | { searchParams?: SearchParams },
+    maybeOptions?: { searchParams?: SearchParams }
   ): () => void {
     let params: Record<string, string> | undefined
     let callback: (state: QueryState<TData, E>) => void
+    let searchParams: SearchParams | undefined
 
     if (typeof paramsOrCallback === 'function') {
       callback = paramsOrCallback
+      searchParams = (
+        maybeCallbackOrOptions as { searchParams?: SearchParams } | undefined
+      )?.searchParams
     } else {
       params = paramsOrCallback
-      callback = maybeCallback!
+      callback = maybeCallbackOrOptions as (
+        state: QueryState<TData, E>
+      ) => void
+      searchParams = maybeOptions?.searchParams
     }
 
-    const key = queryCache.buildKey(path, params)
+    const key = queryCache.buildKey(path, params, searchParams)
     queryCache.getOrCreate(key, staleTime, gcTime)
     queryCache.addSubscriber(key)
 
@@ -183,18 +205,40 @@ export function createQuery<TData, E, TPath extends string>(
     }
   }
 
-  function invalidate(params?: Record<string, string>): void {
-    const key = queryCache.buildKey(path, params)
+  function invalidate(...args: any[]): void {
+    let params: Record<string, string> | undefined
+    let options: { searchParams?: SearchParams } | undefined
+
+    if (hasPathParams) {
+      params = args[0]
+      options = args[1]
+    } else {
+      options = args[0]
+    }
+
+    const key = queryCache.buildKey(path, params, options?.searchParams)
     queryCache.invalidate(key)
     notifier.notify(key)
   }
 
-  function refetch(
-    params?: Record<string, string>
-  ): Promise<SafeResult<TData, E>> {
-    const key = queryCache.buildKey(path, params)
+  function refetch(...args: any[]): Promise<SafeResult<TData, E>> {
+    let params: Record<string, string> | undefined
+    let options: { searchParams?: SearchParams } | undefined
+
+    if (hasPathParams) {
+      params = args[0]
+      options = args[1]
+    } else {
+      options = args[0]
+    }
+
+    const searchParams = options?.searchParams
+    const key = queryCache.buildKey(path, params, searchParams)
     queryCache.invalidate(key)
-    return executeInner(params)
+    if (hasPathParams) {
+      return executeInner(params, { searchParams })
+    }
+    return executeInner({ searchParams })
   }
 
   return {

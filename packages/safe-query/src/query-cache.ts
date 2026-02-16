@@ -1,4 +1,4 @@
-import type { CacheEntry } from './types'
+import type { CacheEntry, SearchParams } from './types'
 
 export class QueryCache {
   private cache = new Map<string, CacheEntry<unknown>>()
@@ -11,12 +11,37 @@ export class QueryCache {
     this.defaultGcTime = defaultGcTime
   }
 
-  buildKey(path: string, params?: Record<string, string>): string {
-    if (!params) return path
-    const sorted = Object.entries(params).sort(([a], [b]) =>
-      a.localeCompare(b)
-    )
-    return `${path}?${sorted.map(([k, v]) => `${k}=${v}`).join('&')}`
+  buildKey(
+    path: string,
+    params?: Record<string, string>,
+    searchParams?: SearchParams
+  ): string {
+    let key = path
+    if (params) {
+      const sorted = Object.entries(params).sort(([a], [b]) =>
+        a.localeCompare(b)
+      )
+      key += `?${sorted.map(([k, v]) => `${k}=${v}`).join('&')}`
+    }
+    if (searchParams) {
+      const sorted = Object.entries(searchParams).sort(([a], [b]) =>
+        a.localeCompare(b)
+      )
+      const parts: string[] = []
+      for (const [k, v] of sorted) {
+        if (Array.isArray(v)) {
+          for (const item of v) {
+            parts.push(`${k}=${String(item)}`)
+          }
+        } else {
+          parts.push(`${k}=${String(v)}`)
+        }
+      }
+      if (parts.length > 0) {
+        key += `${params ? '&' : '?'}~${parts.join('&')}`
+      }
+    }
+    return key
   }
 
   get(key: string): CacheEntry<unknown> | undefined {

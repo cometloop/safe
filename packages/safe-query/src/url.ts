@@ -1,7 +1,10 @@
+import type { SearchParams } from './types'
+
 export function buildUrl(
   baseUrl: string,
   path: string,
-  params?: Record<string, string>
+  params?: Record<string, string>,
+  searchParams?: SearchParams
 ): string {
   let resolvedPath = path
   if (params) {
@@ -15,5 +18,30 @@ export function buildUrl(
 
   const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
   const p = resolvedPath.startsWith('/') ? resolvedPath : `/${resolvedPath}`
-  return `${base}${p}`
+  let url = `${base}${p}`
+
+  if (searchParams) {
+    const parts: string[] = []
+    const sorted = Object.entries(searchParams).sort(([a], [b]) =>
+      a.localeCompare(b)
+    )
+    for (const [key, value] of sorted) {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          parts.push(
+            `${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`
+          )
+        }
+      } else {
+        parts.push(
+          `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
+        )
+      }
+    }
+    if (parts.length > 0) {
+      url += `?${parts.join('&')}`
+    }
+  }
+
+  return url
 }

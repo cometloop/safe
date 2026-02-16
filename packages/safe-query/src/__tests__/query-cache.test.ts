@@ -29,6 +29,39 @@ describe('QueryCache', () => {
         cache.buildKey('/search', { z: '1', a: '2' })
       ).toBe('/search?a=2&z=1')
     })
+
+    it('includes search params in key', () => {
+      const cache = new QueryCache()
+      expect(
+        cache.buildKey('/users', undefined, { search: 'foo', page: 2 })
+      ).toBe('/users?~page=2&search=foo')
+    })
+
+    it('includes both path params and search params in key', () => {
+      const cache = new QueryCache()
+      expect(
+        cache.buildKey('/users/:id', { id: '123' }, { page: 1 })
+      ).toBe('/users/:id?id=123&~page=1')
+    })
+
+    it('produces different keys for different search params', () => {
+      const cache = new QueryCache()
+      const key1 = cache.buildKey('/users', undefined, { page: 1 })
+      const key2 = cache.buildKey('/users', undefined, { page: 2 })
+      expect(key1).not.toBe(key2)
+    })
+
+    it('handles array search params in key', () => {
+      const cache = new QueryCache()
+      expect(
+        cache.buildKey('/users', undefined, { tag: ['a', 'b'] })
+      ).toBe('/users?~tag=a&tag=b')
+    })
+
+    it('handles empty search params', () => {
+      const cache = new QueryCache()
+      expect(cache.buildKey('/users', undefined, {})).toBe('/users')
+    })
   })
 
   describe('getOrCreate', () => {

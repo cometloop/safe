@@ -17,8 +17,12 @@ export type {
   MutationConfig,
   OptimisticConfig,
   QueryObject,
+  QueryExecuteOptions,
   MutationObject,
+  MutationExecuteOptions,
   Subscriber,
+  SearchParamValue,
+  SearchParams,
 } from './types'
 export { HttpError as HttpErrorClass } from './types'
 export { QueryCache } from './query-cache'

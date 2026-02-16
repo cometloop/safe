@@ -328,6 +328,111 @@ describe('Integration', () => {
     unsub()
   })
 
+  it('query with search params hits correct URL', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-length': '100' }),
+        json: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
+      })
+    )
+
+    const api = createSafeQueryClient<AppError>({
+      name: 'test',
+      baseUrl: 'https://api.example.com',
+      parseError: (e) => ({
+        code: 'UNKNOWN',
+        message: e instanceof Error ? e.message : String(e),
+      }),
+      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+    })
+
+    const usersQuery = api.query('/users')
+    const [result, err] = await usersQuery.execute({
+      searchParams: { search: 'alice', page: 1 },
+    })
+
+    expect(err).toBeNull()
+    expect(result).toEqual([{ id: '1', name: 'Alice' }])
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.example.com/users?page=1&search=alice',
+      expect.any(Object)
+    )
+  })
+
+  it('different search params produce different cache entries', async () => {
+    let callCount = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => {
+        callCount++
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-length': '100' }),
+          json: () => Promise.resolve([{ page: callCount }]),
+        })
+      })
+    )
+
+    const api = createSafeQueryClient<AppError>({
+      name: 'test',
+      baseUrl: 'https://api.example.com',
+      parseError: (e) => ({
+        code: 'UNKNOWN',
+        message: e instanceof Error ? e.message : String(e),
+      }),
+      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+      staleTime: 60000,
+    })
+
+    const usersQuery = api.query('/users', { staleTime: 60000 })
+
+    const [r1] = await usersQuery.execute({ searchParams: { page: 1 } })
+    const [r2] = await usersQuery.execute({ searchParams: { page: 2 } })
+
+    expect(r1).toEqual([{ page: 1 }])
+    expect(r2).toEqual([{ page: 2 }])
+    expect(callCount).toBe(2)
+  })
+
+  it('mutation with search params appends to URL', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 201,
+        headers: new Headers({ 'content-length': '100' }),
+        json: () => Promise.resolve({ id: '1', name: 'Alice' }),
+      })
+    )
+
+    const api = createSafeQueryClient<AppError>({
+      name: 'test',
+      baseUrl: 'https://api.example.com',
+      parseError: (e) => ({
+        code: 'UNKNOWN',
+        message: e instanceof Error ? e.message : String(e),
+      }),
+      defaultError: { code: 'UNKNOWN', message: 'Unknown error' },
+    })
+
+    const createUser = api.mutate('/users', { method: 'POST' })
+    const [result, err] = await createUser.execute(
+      { name: 'Alice' },
+      { searchParams: { dryRun: true } }
+    )
+
+    expect(err).toBeNull()
+    expect(result).toEqual({ id: '1', name: 'Alice' })
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.example.com/users?dryRun=true',
+      expect.objectContaining({ method: 'POST' })
+    )
+  })
+
   it('DELETE mutation without path params', async () => {
     vi.stubGlobal(
       'fetch',

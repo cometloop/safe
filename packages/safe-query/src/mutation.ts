@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { MutationConfig } from './types'
+import type { MutationConfig, SearchParams } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
@@ -71,7 +71,7 @@ export function createMutation<TData, E, TPath extends string>(
     // Parse arguments based on path params + method
     let params: Record<string, string> | undefined
     let body: unknown | undefined
-    let options: { signal?: AbortSignal } | undefined
+    let options: { signal?: AbortSignal; searchParams?: SearchParams } | undefined
 
     // Determine if this path has params by checking for :param pattern
     const hasParams = path.includes(':')
@@ -85,7 +85,7 @@ export function createMutation<TData, E, TPath extends string>(
       options = args[1]
     }
 
-    const url = buildUrl(baseUrl, path, params)
+    const url = buildUrl(baseUrl, path, params, options?.searchParams)
     const opt = resolveOptimistic(params)
 
     // Optimistic update flow
