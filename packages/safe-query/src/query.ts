@@ -1,5 +1,6 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
 import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext, LifecycleCallbacks } from './types'
+import { QueryDisabledError } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
@@ -38,9 +39,12 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
   const configOnError = config.onError
   const configOnSettled = config.onSettled
 
+  // When mapToEntities is absent, TMapped = TParsed by type constraint (see QueryConfig).
+  // The cast is safe because the conditional type on QueryConfig requires mapToEntities
+  // whenever TMapped differs from TParsed.
   const combinedParse: ((data: TData) => TMapped) | undefined = mapToEntities
     ? (data: TData) => mapToEntities((parseResponse ? parseResponse(data) : data) as TParsed)
-    : parseResponse as unknown as ((data: TData) => TMapped) | undefined
+    : parseResponse as ((data: TData) => TMapped) | undefined
 
   const hasParams = path.includes(':')
   let warnedDefaultKey = false
@@ -76,6 +80,10 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     }
 
     const isStale = queryCache.isStale(entry)
+    // Status priority: error > success > loading > idle.
+    // When a refetch fails after a previous success, status is 'error' but data
+    // retains the last successful value (stale-while-revalidate pattern).
+    // Consumers can check `status === 'error' && data !== undefined` for this case.
     const status =
       entry.error !== null
         ? 'error'
@@ -106,7 +114,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
         const state = getState(key)
         return Promise.resolve([state.data!, null] as unknown as SafeResult<TMapped, E>)
       }
-      return safeInstance.async<TMapped>(() => { throw new Error('Query is disabled') })
+      return safeInstance.async<TMapped>(() => { throw new QueryDisabledError() })
     }
 
     const invokeOnSuccess = options?.onSuccess

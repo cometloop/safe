@@ -46,9 +46,12 @@ export function createMutation<
   const configOnError = config.onError
   const configOnSettled = config.onSettled
 
+  // When mapToEntities is absent, TMapped = TParsed by type constraint (see MutationConfig).
+  // The cast is safe because the conditional type on MutationConfig requires mapToEntities
+  // whenever TMapped differs from TParsed.
   const combinedParse: ((data: TData) => TMapped) | undefined = mapToEntities
     ? (data: TData) => mapToEntities((parseResponse ? parseResponse(data) : data) as TParsed)
-    : parseResponse as unknown as ((data: TData) => TMapped) | undefined
+    : parseResponse as ((data: TData) => TMapped) | undefined
 
   function resolveOptimistic(params?: Record<string, string>): {
     entityType: string
@@ -72,11 +75,15 @@ export function createMutation<
     const entityType = entityKeys[0]
     if (!entityType) return null
 
-    // Get entity ID from last path param
+    // Get entity ID from the last :param segment in the path
     if (!params) return null
-    const paramValues = Object.values(params)
-    if (paramValues.length === 0) return null
-    const entityId = paramValues[paramValues.length - 1]
+    const lastParam = config.key
+      .split('/')
+      .filter(s => s.startsWith(':'))
+      .pop()
+      ?.substring(1)
+    if (!lastParam) return null
+    const entityId = params[lastParam]
     if (!entityId) return null
 
     return { entityType, entityId }

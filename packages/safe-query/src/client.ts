@@ -120,6 +120,7 @@ export function safeQuery<E>(
       assertNotDisposed()
       queryCache.clear()
       entityStore.clear()
+      notifier.clear()
     },
 
     destroy(): void {

@@ -293,6 +293,52 @@ describe('Integration', () => {
     )
   })
 
+  it('mapToEntities populates entity store and mutation updates flow back to query', async () => {
+    type ApiUser = { type: string; id: string; name: string }
+    type NormalizedUser = ApiUser & { __type: 'user' }
+
+    const api = createApi()
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn: (): Promise<ApiUser[]> =>
+        Promise.resolve([{ type: 'user', id: '1', name: 'Alice' }]),
+      mapToEntities: (users): NormalizedUser[] =>
+        users.map(u => ({ ...u, __type: 'user' as const })),
+      entities: { user: (u: NormalizedUser) => u.id },
+    })
+
+    // Populate cache and entity store via query
+    const [queryResult, queryErr] = await usersQuery()
+    expect(queryErr).toBeNull()
+    const first = queryResult![0]!
+    expect(first.__type).toBe('user')
+    expect(first.name).toBe('Alice')
+
+    // Mutate the entity
+    const updateUser = api.mutate({
+      key: '/users/:id',
+      fn: () =>
+        Promise.resolve({ type: 'user', id: '1', name: 'Alice Updated', __type: 'user' }),
+      method: 'PUT',
+      entities: { user: (u: any) => u.id },
+    })
+
+    await updateUser({ params: { id: '1' }, body: { name: 'Alice Updated' } })
+
+    // Subscribe to the query and verify updated data flows back through entity store
+    const states: any[] = []
+    const unsub = usersQuery.subscribe((state) => {
+      states.push({ ...state })
+    })
+
+    const lastState = states[states.length - 1]
+    expect(lastState.status).toBe('success')
+    expect(lastState.data[0].name).toBe('Alice Updated')
+
+    unsub()
+  })
+
   it('DELETE mutation without path params', async () => {
     const api = createApi()
 

@@ -27,7 +27,7 @@ export type {
   SearchParams,
   LifecycleCallbacks,
 } from './types'
-export { HttpError } from './types'
+export { HttpError, QueryDisabledError } from './types'
 export { QueryCache } from './query-cache'
 export { EntityStore } from './entity-store'
 export { Notifier } from './notifier'

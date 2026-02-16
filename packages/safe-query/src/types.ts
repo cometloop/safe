@@ -111,6 +111,13 @@ export type SearchParams = Record<string, SearchParamValue | SearchParamValue[]>
 
 // ─── HTTP Types ───
 
+export class QueryDisabledError extends Error {
+  constructor() {
+    super('Query is disabled')
+    this.name = 'QueryDisabledError'
+  }
+}
+
 export class HttpError extends Error {
   public readonly status: number
   public readonly statusText: string
@@ -168,12 +175,16 @@ export type QueryConfig<TData, TPath extends string = string, TParsed = TData, T
   key: TPath
   fn: (context: QueryFnContext<TPath>) => Promise<TData>
   parseResponse?: (data: TData) => TParsed
-  mapToEntities?: (data: TParsed) => TMapped
   entities?: EntityExtractors<TMapped>
   staleTime?: number
   gcTime?: number
   retry?: RetryConfig
 } & LifecycleCallbacks<TMapped>
+  & ([TMapped] extends [TParsed]
+    ? [TParsed] extends [TMapped]
+      ? { mapToEntities?: (data: TParsed) => TMapped }
+      : { mapToEntities: (data: TParsed) => TMapped }
+    : { mapToEntities: (data: TParsed) => TMapped })
 
 // ─── Mutation Config ───
 
@@ -200,11 +211,15 @@ export type MutationConfig<
   fn: (context: MutationFnContext<TPath, TBody>) => Promise<TData>
   method?: TMethod
   parseResponse?: (data: TData) => TParsed
-  mapToEntities?: (data: TParsed) => TMapped
   entities?: EntityExtractors<TMapped>
   optimistic?: OptimisticConfig<TPath>
   retry?: RetryConfig
 } & LifecycleCallbacks<TMapped>
+  & ([TMapped] extends [TParsed]
+    ? [TParsed] extends [TMapped]
+      ? { mapToEntities?: (data: TParsed) => TMapped }
+      : { mapToEntities: (data: TParsed) => TMapped }
+    : { mapToEntities: (data: TParsed) => TMapped })
 
 // ─── Invoke Options ───
 

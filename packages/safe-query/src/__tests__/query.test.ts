@@ -620,6 +620,34 @@ describe('createQuery', () => {
     warnSpy.mockRestore()
   })
 
+  it('preserves stale data when refetch fails (stale-while-revalidate)', async () => {
+    const users = [{ id: '1', name: 'Alice' }]
+    let callCount = 0
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve(users)
+      return Promise.reject(new Error('Server error'))
+    })
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn,
+    }, deps)
+
+    // First call succeeds
+    await query()
+    expect(query.status).toBe('success')
+    expect(query.data).toEqual(users)
+
+    // Force refetch that fails
+    await query.refetch()
+    expect(query.status).toBe('error')
+    // Data should still be the stale value from the first success
+    expect(query.data).toEqual(users)
+    expect(query.error).toBe('Server error')
+  })
+
   it('mapToEntities transforms data and entities are normalized', async () => {
     type ApiUser = { type: string; id: string; name: string }
     type NormalizedUser = ApiUser & { __type: 'user' }
