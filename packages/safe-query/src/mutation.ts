@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { MutationConfig, MutationCallable } from './types'
+import type { MutationConfig, MutationCallable, SearchParams, MutationFnContext } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
@@ -12,10 +12,21 @@ export type MutationDeps<E> = {
   enableOptimisticUpdates: boolean
 }
 
-export function createMutation<TData, TBody = void, E = unknown, TPath extends string = string>(
-  config: MutationConfig<TData, TBody, TPath>,
+export function createMutation<
+  TData,
+  TBody = void,
+  E = unknown,
+  TPath extends string = string,
+  TMethod extends 'POST' | 'PUT' | 'PATCH' | 'DELETE' =
+    | 'POST'
+    | 'PUT'
+    | 'PATCH'
+    | 'DELETE',
+  TParsed = TData,
+>(
+  config: MutationConfig<TData, TBody, TPath, TMethod, TParsed>,
   deps: MutationDeps<E>
-): MutationCallable<TData, E, TPath, TBody> {
+): MutationCallable<TParsed, E, TPath, TBody> {
   const {
     safeInstance,
     queryCache,
@@ -60,7 +71,7 @@ export function createMutation<TData, TBody = void, E = unknown, TPath extends s
     return { entityType, entityId }
   }
 
-  function invoke(options: any): Promise<SafeResult<TData, E>> {
+  function invoke(options: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; body?: unknown }): Promise<SafeResult<TParsed, E>> {
     const params = options?.params
     const body = options?.body
     const opt = resolveOptimistic(params)
@@ -73,7 +84,7 @@ export function createMutation<TData, TBody = void, E = unknown, TPath extends s
       snapshot = entityStore.snapshot()
       const existing = entityStore.get(opt.entityType, opt.entityId)
       if (existing) {
-        const merged = { ...(existing as any), ...(body as any) }
+        const merged = { ...(existing as Record<string, unknown>), ...(body as Record<string, unknown>) }
         entityStore.set(opt.entityType, opt.entityId, merged)
         affectedQueryKeys = entityStore.getQueriesForEntity(
           opt.entityType,
@@ -91,13 +102,15 @@ export function createMutation<TData, TBody = void, E = unknown, TPath extends s
       notifier.notifyMany(affectedQueryKeys)
     }
 
-    return safeInstance.async<TData, TData>(
-      () => {
-        return config.fn(options as any)
+    return safeInstance.async<TData, TParsed>(
+      (signal) => {
+        const context = { ...options }
+        if (signal) context.signal = options?.signal ?? signal
+        return config.fn(context as MutationFnContext<TPath, TBody>)
       },
       {
         parseResult: parseResponse as
-          | ((response: TData) => TData)
+          | ((response: TData) => TParsed)
           | undefined,
         retry,
         onSuccess: (result) => {
@@ -141,5 +154,5 @@ export function createMutation<TData, TBody = void, E = unknown, TPath extends s
     )
   }
 
-  return invoke as MutationCallable<TData, E, TPath, TBody>
+  return invoke as MutationCallable<TParsed, E, TPath, TBody>
 }

@@ -145,13 +145,13 @@ export type SafeQueryConfig<E> = {
 export type QueryFnContext<TPath extends string> = {
   searchParams?: SearchParams
   signal?: AbortSignal
-} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : Record<string, never>)
+} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
 
 export type MutationFnContext<TPath extends string, TBody> = {
   searchParams?: SearchParams
   signal?: AbortSignal
-} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : Record<string, never>)
-  & ([TBody] extends [void | undefined] ? Record<string, never> : { body: TBody })
+} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
+  & ([TBody] extends [void | undefined] ? {} : { body: TBody })
 
 // ─── Query Config ───
 
@@ -203,7 +203,7 @@ export type QueryInvokeOptions<TPath extends string> =
 
 export type MutationInvokeOptions<TPath extends string, TBody> =
   { searchParams?: SearchParams; signal?: AbortSignal }
-  & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : Record<string, never>)
+  & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : {})
   & ([TBody] extends [void | undefined] ? { body?: unknown } : { body: TBody })
 
 export type KeyOptions<TPath extends string> =

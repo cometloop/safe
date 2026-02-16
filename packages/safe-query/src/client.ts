@@ -53,14 +53,14 @@ export function safeQuery<E>(
     query: <TData, TPath extends string = string, TParsed = TData>(
       queryConfig: QueryConfig<TData, TPath, TParsed>
     ) => {
-      return createQuery(queryConfig as any, {
+      return createQuery<TData, E, TPath, TParsed>(queryConfig, {
         safeInstance,
         queryCache,
         entityStore,
         notifier,
         defaultStaleTime: staleTime,
         defaultGcTime: gcTime,
-      }) as any
+      })
     },
 
     mutate: <
@@ -76,13 +76,13 @@ export function safeQuery<E>(
     >(
       mutationConfig: MutationConfig<TData, TBody, TPath, TMethod, TParsed>
     ) => {
-      return createMutation(mutationConfig as any, {
+      return createMutation<TData, TBody, E, TPath, TMethod, TParsed>(mutationConfig, {
         safeInstance,
         queryCache,
         entityStore,
         notifier,
         enableOptimisticUpdates,
-      }) as any
+      })
     },
   }
 }

@@ -10,7 +10,6 @@ export type {
   EntityRef,
   QueryState,
   CacheEntry,
-  HttpError,
   FetchOptions,
   SafeQueryConfig,
   QueryConfig,
@@ -27,7 +26,7 @@ export type {
   SearchParamValue,
   SearchParams,
 } from './types'
-export { HttpError as HttpErrorClass } from './types'
+export { HttpError } from './types'
 export { QueryCache } from './query-cache'
 export { EntityStore } from './entity-store'
 export { Notifier } from './notifier'

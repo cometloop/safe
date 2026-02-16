@@ -1,6 +1,7 @@
 {
   "extends": "@core/typescript-config/base.json",
   "compilerOptions": {
+    "target": "ES2022",
     "outDir": "dist",
     "rootDir": "src",
     "lib": ["ES2022", "DOM"]
