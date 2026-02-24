@@ -1,0 +1,50 @@
+name: Publish to GitHub Packages
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish-gpr:
+    name: Publish to GitHub Packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Parse tag
+        id: parse
+        run: |
+          TAG="${{ github.ref_name }}"
+          # Extract package name and version from tag like @cometloop/safe@0.1.0
+          NAME="${TAG%@*}"
+          VERSION="${TAG##*@}"
+          DIR="packages/${NAME#@cometloop/}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "dir=${DIR}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${NAME}@${VERSION} from ${DIR}"
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter "${{ steps.parse.outputs.name }}" build
+
+      - name: Publish to GitHub Packages
+        run: |
+          echo "@cometloop:registry=https://npm.pkg.github.com" > "$RUNNER_TEMP/.npmrc_gpr"
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> "$RUNNER_TEMP/.npmrc_gpr"
+
+          npm publish "./${{ steps.parse.outputs.dir }}" \
+            --userconfig="$RUNNER_TEMP/.npmrc_gpr" \
+            --provenance=false \
+            --access=public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
