@@ -31,12 +31,20 @@ export type {
   QueryInvokeOptions,
   MutationInvokeOptions,
   KeyOptions,
+  SubscribeOptions,
   Subscriber,
   SearchParamValue,
   SearchParams,
   LifecycleCallbacks,
+  InfiniteData,
+  InfiniteQueryConfig,
+  InfiniteQueryState,
+  InfiniteQueryCallable,
+  InfiniteQueryFnContext,
+  DehydratedState,
+  DehydratedQuery,
 } from './types'
-export { HttpError, QueryDisabledError } from './types'
+export { HttpError, QueryDisabledError, QueryAbortedError } from './types'
 export { QueryCache } from './query-cache'
 export { FocusManager } from './focus-manager'
 export { buildUrl } from './url'

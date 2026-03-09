@@ -7,6 +7,16 @@ export const navigation = [
     ],
   },
   {
+    title: '@cometloop/safe-query',
+    links: [
+      { title: 'Select / Transform', href: '/docs/safe-query-select' },
+      { title: 'Enabled on Subscribe', href: '/docs/safe-query-enabled-subscribe' },
+      { title: 'Query Cancellation', href: '/docs/safe-query-cancellation' },
+      { title: 'Infinite Queries', href: '/docs/safe-query-infinite-queries' },
+      { title: 'SSR / Hydration', href: '/docs/safe-query-ssr-hydration' },
+    ],
+  },
+  {
     title: 'Best practices',
     links: [
       { title: 'Recommended patterns', href: '/docs/recommended-patterns' },

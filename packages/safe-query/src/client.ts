@@ -2,10 +2,13 @@ import type {
   SafeQueryConfig,
   QueryConfig,
   MutationConfig,
+  InfiniteQueryConfig,
   QueryCallable,
   MutationCallable,
+  InfiniteQueryCallable,
   GlobalEntityConfig,
   SearchParams,
+  DehydratedState,
 } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
@@ -13,6 +16,8 @@ import { Notifier } from './notifier'
 import { FocusManager } from './focus-manager'
 import { createQuery } from './query'
 import { createMutation } from './mutation'
+import { createInfiniteQuery } from './infinite-query'
+import { dehydrateCache, hydrateCache } from './hydration'
 
 export type SafeQueryClient<E, TEntities extends GlobalEntityConfig = GlobalEntityConfig> = {
   query: <TData, TPath extends string = string, TParsed = TData, TMapped = TParsed>(
@@ -37,6 +42,9 @@ export type SafeQueryClient<E, TEntities extends GlobalEntityConfig = GlobalEnti
     TPath,
     TBody
   >
+  infiniteQuery: <TData, TPath extends string = string, TParsed = TData, TMapped = TParsed>(
+    config: InfiniteQueryConfig<TData, TPath, TParsed, TMapped, TEntities>
+  ) => InfiniteQueryCallable<TMapped, E, TPath>
   getQueryData: <TData = unknown>(
     path: string,
     options?: { params?: Record<string, string>; searchParams?: SearchParams },
@@ -46,8 +54,14 @@ export type SafeQueryClient<E, TEntities extends GlobalEntityConfig = GlobalEnti
     updater: TData | ((old: TData | undefined) => TData | undefined),
     options?: { params?: Record<string, string>; searchParams?: SearchParams },
   ) => void
+  cancelQuery: (
+    path: string,
+    options?: { params?: Record<string, string>; searchParams?: SearchParams },
+  ) => void
   invalidateByPrefix: (prefix: string) => void
   invalidateAll: () => void
+  dehydrate: () => DehydratedState
+  hydrate: (state: DehydratedState) => void
   clear: () => void
   destroy: () => void
 }
@@ -71,6 +85,7 @@ export function safeQuery<E, TEntities extends GlobalEntityConfig = GlobalEntity
   const notifier = new Notifier()
   const focusManager = new FocusManager()
   const normalizeRegistry = new Map<string, (data: any) => Record<string, unknown | unknown[]>>()
+  const cleanups: (() => void)[] = []
   let disposed = false
 
   function assertNotDisposed(): void {
@@ -99,6 +114,7 @@ export function safeQuery<E, TEntities extends GlobalEntityConfig = GlobalEntity
         defaultRefetchInterval: refetchInterval,
         defaultRefetchIntervalInBackground: refetchIntervalInBackground,
         defaultRefetchOnWindowFocus: refetchOnWindowFocus,
+        registerCleanup: (cleanup: () => void) => cleanups.push(cleanup),
       })
     },
 
@@ -124,6 +140,26 @@ export function safeQuery<E, TEntities extends GlobalEntityConfig = GlobalEntity
         notifier,
         entities,
         enableOptimisticUpdates,
+      })
+    },
+
+    infiniteQuery: <TData, TPath extends string = string, TParsed = TData, TMapped = TParsed>(
+      infiniteConfig: InfiniteQueryConfig<TData, TPath, TParsed, TMapped, TEntities>
+    ) => {
+      assertNotDisposed()
+      return createInfiniteQuery<TData, E, TPath, TParsed, TMapped>(infiniteConfig, {
+        safeInstance,
+        queryCache,
+        entityStore,
+        notifier,
+        entities,
+        defaultStaleTime: staleTime,
+        defaultGcTime: gcTime,
+        focusManager,
+        defaultRefetchInterval: refetchInterval,
+        defaultRefetchIntervalInBackground: refetchIntervalInBackground,
+        defaultRefetchOnWindowFocus: refetchOnWindowFocus,
+        registerCleanup: (cleanup: () => void) => cleanups.push(cleanup),
       })
     },
 
@@ -187,6 +223,16 @@ export function safeQuery<E, TEntities extends GlobalEntityConfig = GlobalEntity
       notifier.notify(key)
     },
 
+    cancelQuery(
+      path: string,
+      options?: { params?: Record<string, string>; searchParams?: SearchParams },
+    ): void {
+      assertNotDisposed()
+      const key = queryCache.buildKey(path, options?.params, options?.searchParams)
+      queryCache.cancelInflight(key)
+      notifier.notify(key)
+    },
+
     invalidateByPrefix(prefix: string): void {
       assertNotDisposed()
       const keys = queryCache.invalidateByPrefix(prefix)
@@ -203,6 +249,16 @@ export function safeQuery<E, TEntities extends GlobalEntityConfig = GlobalEntity
       }
     },
 
+    dehydrate(): DehydratedState {
+      assertNotDisposed()
+      return dehydrateCache(queryCache)
+    },
+
+    hydrate(state: DehydratedState): void {
+      assertNotDisposed()
+      hydrateCache(queryCache, entityStore, notifier, state, entities, staleTime, gcTime)
+    },
+
     clear(): void {
       assertNotDisposed()
       queryCache.clear()
@@ -213,6 +269,8 @@ export function safeQuery<E, TEntities extends GlobalEntityConfig = GlobalEntity
     destroy(): void {
       if (disposed) return
       disposed = true
+      for (const cleanup of cleanups) cleanup()
+      cleanups.length = 0
       queryCache.destroy()
       entityStore.clear()
       notifier.clear()

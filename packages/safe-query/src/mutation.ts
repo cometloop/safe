@@ -69,6 +69,11 @@ export function createMutation<
   }
   const subscribers = new Set<(s: MutationState<TMapped, E>) => void>()
 
+  // Generation counter to track the latest invocation. Only the latest
+  // invocation is allowed to update shared state, preventing concurrent
+  // mutations from clobbering each other.
+  let currentGeneration = 0
+
   function setState(updates: Partial<MutationState<TMapped, E>>) {
     const status = updates.status ?? state.status
     state = {
@@ -129,6 +134,8 @@ export function createMutation<
     const invokeOnError = options?.onError
     const invokeOnSettled = options?.onSettled
 
+    const generation = ++currentGeneration
+
     setState({ status: 'pending', data: undefined, error: null, submittedAt: Date.now() })
 
     let mutateContext: unknown
@@ -179,7 +186,7 @@ export function createMutation<
 
     let signalCleanup: (() => void) | null = null
 
-    return safeInstance.async<TData, TMapped>(
+    const promise = safeInstance.async<TData, TMapped>(
       (signal) => {
         const context = { ...options }
         if (signal || options?.signal) {
@@ -215,7 +222,9 @@ export function createMutation<
         parseResult: combinedParse,
         retry,
         onSuccess: (result) => {
-          setState({ status: 'success', data: result, error: null })
+          if (generation === currentGeneration) {
+            setState({ status: 'success', data: result, error: null })
+          }
 
           // Normalize server response BEFORE ending optimistic tracking,
           // so endOptimistic can snapshot confirmed server state as new base
@@ -264,7 +273,9 @@ export function createMutation<
           invokeOnSuccess?.(result)
         },
         onError: (error) => {
-          setState({ status: 'error', error: error as E })
+          if (generation === currentGeneration) {
+            setState({ status: 'error', error: error as E })
+          }
 
           // Rollback optimistic update using per-entity tracking
           if (didOptimistic && opt) {
@@ -284,15 +295,21 @@ export function createMutation<
           invokeOnError?.(error as E)
         },
         onSettled: (result, error) => {
-          if (signalCleanup) {
-            signalCleanup()
-            signalCleanup = null
-          }
           configOnSettled?.(result as TMapped | undefined, error as E | null, mutateContext)
           invokeOnSettled?.(result as TMapped | undefined, error as E | null)
         },
       }
     )
+
+    // Guarantee signal listener cleanup even if onSettled is never called
+    promise.finally(() => {
+      if (signalCleanup) {
+        signalCleanup()
+        signalCleanup = null
+      }
+    })
+
+    return promise
   }
 
   // ─── Build callable with state tracking ───

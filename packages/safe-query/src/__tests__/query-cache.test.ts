@@ -19,7 +19,7 @@ describe('QueryCache', () => {
     it('builds key with sorted params', () => {
       const cache = new QueryCache()
       expect(cache.buildKey('/users/:id', { id: '123' })).toBe(
-        '/users/:id?id=123'
+        '/users/:id[id=123]'
       )
     })
 
@@ -27,21 +27,21 @@ describe('QueryCache', () => {
       const cache = new QueryCache()
       expect(
         cache.buildKey('/search', { z: '1', a: '2' })
-      ).toBe('/search?a=2&z=1')
+      ).toBe('/search[a=2&z=1]')
     })
 
     it('includes search params in key', () => {
       const cache = new QueryCache()
       expect(
         cache.buildKey('/users', undefined, { search: 'foo', page: 2 })
-      ).toBe('/users?~page=2&~search=foo')
+      ).toBe('/users{page=2&search=foo}')
     })
 
     it('includes both path params and search params in key', () => {
       const cache = new QueryCache()
       expect(
         cache.buildKey('/users/:id', { id: '123' }, { page: 1 })
-      ).toBe('/users/:id?id=123&~page=1')
+      ).toBe('/users/:id[id=123]{page=1}')
     })
 
     it('produces different keys for different search params', () => {
@@ -55,7 +55,7 @@ describe('QueryCache', () => {
       const cache = new QueryCache()
       expect(
         cache.buildKey('/users', undefined, { tag: ['a', 'b'] })
-      ).toBe('/users?~tag=a&~tag=b')
+      ).toBe('/users{tag=a&tag=b}')
     })
 
     it('handles empty search params', () => {
@@ -63,12 +63,11 @@ describe('QueryCache', () => {
       expect(cache.buildKey('/users', undefined, {})).toBe('/users')
     })
 
-    it('prefixes every search param key with ~ to avoid collision with path params', () => {
+    it('separates search params in curly braces to avoid collision with path params', () => {
       const cache = new QueryCache()
-      // Each search param key should get a ~ prefix
       expect(
         cache.buildKey('/users', undefined, { page: 1, limit: 10 })
-      ).toBe('/users?~limit=10&~page=1')
+      ).toBe('/users{limit=10&page=1}')
     })
 
     it('produces different keys when path param and search param share a name', () => {
@@ -78,18 +77,18 @@ describe('QueryCache', () => {
       expect(keyWithPathParam).not.toBe(keyWithSearchParam)
     })
 
-    it('prefixes every search param key with ~ when combined with path params', () => {
+    it('uses curly braces for search params when combined with path params', () => {
       const cache = new QueryCache()
       expect(
         cache.buildKey('/users/:id', { id: '1' }, { page: 1, limit: 10 })
-      ).toBe('/users/:id?id=1&~limit=10&~page=1')
+      ).toBe('/users/:id[id=1]{limit=10&page=1}')
     })
 
-    it('prefixes all array search param keys with ~', () => {
+    it('handles array search params in curly braces', () => {
       const cache = new QueryCache()
       expect(
         cache.buildKey('/users', undefined, { tag: ['a', 'b'], sort: 'name' })
-      ).toBe('/users?~sort=name&~tag=a&~tag=b')
+      ).toBe('/users{sort=name&tag=a&tag=b}')
     })
 
     it('encodes special characters in param values to avoid key collisions', () => {
@@ -102,7 +101,7 @@ describe('QueryCache', () => {
     it('encodes special characters in param keys', () => {
       const cache = new QueryCache()
       const key = cache.buildKey('/path', { 'a&b': 'value' })
-      expect(key).toBe('/path?a%26b=value')
+      expect(key).toBe('/path[a%26b=value]')
     })
 
     it('encodes special characters in search param values', () => {
@@ -115,7 +114,7 @@ describe('QueryCache', () => {
     it('encodes special characters in array search param values', () => {
       const cache = new QueryCache()
       const key = cache.buildKey('/path', undefined, { tag: ['a=1', 'b&c'] })
-      expect(key).toBe('/path?~tag=a%3D1&~tag=b%26c')
+      expect(key).toBe('/path{tag=a%3D1&tag=b%26c}')
     })
   })
 
@@ -573,6 +572,36 @@ describe('QueryCache', () => {
       cache.getOrCreate('/users')
       cache.getOrCreate('/posts')
       expect([...cache.keys()]).toEqual(['/users', '/posts'])
+    })
+  })
+
+  describe('size', () => {
+    it('returns number of cache entries', () => {
+      const cache = new QueryCache()
+      expect(cache.size()).toBe(0)
+      cache.getOrCreate('/users')
+      expect(cache.size()).toBe(1)
+      cache.getOrCreate('/posts')
+      expect(cache.size()).toBe(2)
+    })
+  })
+
+  describe('gc timer rescheduling', () => {
+    it('clears existing gc timer when rescheduling', () => {
+      const cache = new QueryCache(0, 1000)
+      const entry = cache.getOrCreate('/users', 0, 1000)
+
+      // Add subscriber then remove to trigger gc schedule
+      cache.addSubscriber('/users')
+      cache.removeSubscriber('/users')
+
+      // Add and remove again — should clear the first timer and schedule a new one
+      cache.addSubscriber('/users')
+      cache.removeSubscriber('/users')
+
+      // Advance past gc time — entry should be collected
+      vi.advanceTimersByTime(1500)
+      expect(cache.get('/users')).toBeUndefined()
     })
   })
 })

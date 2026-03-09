@@ -1162,4 +1162,143 @@ describe('createMutation', () => {
       searchParams: { notify: true },
     })
   })
+
+  // ─── Bug #4: Concurrent mutation state isolation ───
+
+  it('concurrent mutations: second call does not clobber first call state', async () => {
+    let resolve1: (v: any) => void
+    let resolve2: (v: any) => void
+    const promise1 = new Promise((r) => { resolve1 = r })
+    const promise2 = new Promise((r) => { resolve2 = r })
+
+    let callCount = 0
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return callCount === 1 ? promise1 : promise2
+    })
+
+    const deps = createDeps()
+    const mutation = createMutation({ key: '/users', fn, method: 'POST' }, deps)
+
+    const states: string[] = []
+    mutation.subscribe((s) => { states.push(s.status) })
+
+    const p1 = mutation({ body: { name: 'Alice' } })
+    // State is 'pending' from first call
+
+    const p2 = mutation({ body: { name: 'Bob' } })
+    // State is 'pending' from second call (second is now current generation)
+
+    // First resolves — should NOT update state since second call is current
+    resolve1!({ id: '1', name: 'Alice' })
+    await p1
+
+    // State should still be 'pending' because second call is the current one
+    expect(mutation.status).toBe('pending')
+
+    // Second resolves — this one should update state
+    resolve2!({ id: '2', name: 'Bob' })
+    await p2
+
+    expect(mutation.status).toBe('success')
+    expect(mutation.data).toEqual({ id: '2', name: 'Bob' })
+  })
+
+  it('concurrent mutations: first error does not clobber second pending state', async () => {
+    let reject1: (e: any) => void
+    let resolve2: (v: any) => void
+    const promise1 = new Promise((_, rej) => { reject1 = rej })
+    const promise2 = new Promise((r) => { resolve2 = r })
+
+    let callCount = 0
+    const fn = vi.fn().mockImplementation(() => {
+      callCount++
+      return callCount === 1 ? promise1 : promise2
+    })
+
+    const deps = createDeps()
+    const mutation = createMutation({ key: '/users', fn, method: 'POST' }, deps)
+
+    const p1 = mutation({ body: { name: 'Alice' } })
+    const p2 = mutation({ body: { name: 'Bob' } })
+
+    // First fails — should NOT set state to error since second is current
+    reject1!(new Error('fail'))
+    await p1
+
+    expect(mutation.status).toBe('pending')
+    expect(mutation.isError).toBe(false)
+
+    resolve2!({ id: '2', name: 'Bob' })
+    await p2
+
+    expect(mutation.status).toBe('success')
+    expect(mutation.data).toEqual({ id: '2', name: 'Bob' })
+  })
+
+  // ─── Bug #5: Signal cleanup guarantee ───
+
+  it('signal listeners are cleaned up even if onSettled is bypassed', async () => {
+    const fn = vi.fn().mockResolvedValue({ id: '1' })
+
+    const deps = createDeps()
+    const mutation = createMutation({ key: '/users', fn, method: 'POST' }, deps)
+
+    const userController = new AbortController()
+    const removeListenerSpy = vi.spyOn(userController.signal, 'removeEventListener')
+
+    await mutation({ body: { name: 'Alice' }, signal: userController.signal })
+
+    // The signal cleanup should have been called via .finally()
+    expect(removeListenerSpy).toHaveBeenCalled()
+  })
+
+  // ─── Coverage: already-aborted safe signal ───
+
+  it('handles already-aborted safe instance signal', async () => {
+    let capturedSignal: AbortSignal | undefined
+    const fn = vi.fn().mockImplementation((ctx: any) => {
+      capturedSignal = ctx.signal
+      return Promise.resolve({ id: '1' })
+    })
+
+    const safeInstance = createSafe({
+      parseError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      defaultError: 'Unknown error',
+      abortAfter: 5000,
+    })
+
+    const deps = createDeps({ safeInstance })
+    const mutation = createMutation({ key: '/users', fn, method: 'POST' }, deps)
+
+    const userController = new AbortController()
+    userController.abort('pre-aborted')
+    await mutation({ body: { name: 'Alice' }, signal: userController.signal })
+
+    expect(capturedSignal!.aborted).toBe(true)
+  })
+
+  // ─── Coverage: normalize in mutation onSuccess ───
+
+  it('onSuccess with normalize uses normalizeExplicit', async () => {
+    const fn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice' })
+
+    const deps = createDeps({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
+    const mutation = createMutation({
+      key: '/users',
+      fn,
+      method: 'POST',
+      normalize: (data: any) => ({ user: [data] }),
+    }, deps)
+
+    await mutation({ body: { name: 'Alice' } })
+
+    expect(deps.entityStore.get('user', '1')).toEqual(
+      expect.objectContaining({ id: '1', name: 'Alice' })
+    )
+  })
 })

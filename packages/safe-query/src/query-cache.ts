@@ -24,7 +24,7 @@ export class QueryCache {
       const sorted = Object.entries(params).sort(([a], [b]) =>
         a.localeCompare(b)
       )
-      key += `?${sorted.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`
+      key += `[${sorted.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}]`
     }
     if (searchParams) {
       const sorted = Object.entries(searchParams).sort(([a], [b]) =>
@@ -34,14 +34,14 @@ export class QueryCache {
       for (const [k, v] of sorted) {
         if (Array.isArray(v)) {
           for (const item of v) {
-            parts.push(`~${encodeURIComponent(k)}=${encodeURIComponent(String(item))}`)
+            parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(item))}`)
           }
         } else {
-          parts.push(`~${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+          parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
         }
       }
       if (parts.length > 0) {
-        key += `${params ? '&' : '?'}${parts.join('&')}`
+        key += `{${parts.join('&')}}`
       }
     }
     return key
@@ -216,5 +216,13 @@ export class QueryCache {
 
   keys(): IterableIterator<string> {
     return this.cache.keys()
+  }
+
+  entries(): IterableIterator<[string, CacheEntry<unknown>]> {
+    return this.cache.entries()
+  }
+
+  size(): number {
+    return this.cache.size
   }
 }

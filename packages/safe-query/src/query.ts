@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext, DataFnContext, LifecycleCallbacks, GlobalEntityConfig } from './types'
+import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext, DataFnContext, LifecycleCallbacks, GlobalEntityConfig, SubscribeOptions } from './types'
 import { QueryDisabledError } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
@@ -18,6 +18,7 @@ export type QueryDeps<E> = {
   defaultRefetchInterval: number | false
   defaultRefetchIntervalInBackground: boolean
   defaultRefetchOnWindowFocus: boolean
+  registerCleanup: (cleanup: () => void) => void
 }
 
 export function createQuery<TData, E, TPath extends string, TParsed = TData, TMapped = TParsed>(
@@ -61,8 +62,13 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
   const intervalTimers = new Map<string, ReturnType<typeof setInterval>>()
   const focusUnsubs = new Map<string, () => void>()
 
-  // Track last successful data across all keys for keepPreviousData support
-  let lastSuccessfulData: TMapped | undefined = undefined
+  deps.registerCleanup(() => {
+    for (const key of [...intervalTimers.keys()]) stopInterval(key)
+    for (const key of [...focusUnsubs.keys()]) stopFocusListener(key)
+  })
+
+  // Track last successful data per cache key for keepPreviousData support
+  const lastSuccessfulDataMap = new Map<string, TMapped>()
 
   // When mapToEntities is absent, TMapped = TParsed by type constraint (see QueryConfig).
   // The cast is safe because the conditional type on QueryConfig requires mapToEntities
@@ -178,7 +184,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     // Placeholder injection: only when no real data and fetch in progress
     let isPlaceholderData = false
     if (data === undefined && entry.inflightPromise !== null && placeholderData !== undefined) {
-      const resolved = resolveDataOption(placeholderData, params, searchParams, lastSuccessfulData)
+      const resolved = resolveDataOption(placeholderData, params, searchParams, lastSuccessfulDataMap.get(key))
       if (resolved !== undefined) {
         data = resolved
         isPlaceholderData = true
@@ -264,8 +270,8 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
           // Check generation to discard stale responses
           if (entry.generation !== generation) return
 
-          // Track last successful data for keepPreviousData
-          lastSuccessfulData = result
+          // Track last successful data per key for keepPreviousData
+          lastSuccessfulDataMap.set(key, result)
 
           if (normalize && entities) {
             const entityMap = normalize(result)
@@ -360,37 +366,51 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
   }
 
   function subscribe(
-    callback: (state: QueryState<TMapped, E>) => void,
-    options?: { params?: Record<string, string>; searchParams?: SearchParams },
+    callback: (state: QueryState<any, E>) => void,
+    options?: SubscribeOptions<TPath, TMapped, any>,
   ): () => void {
-    const params = options?.params
-    const searchParams = options?.searchParams
+    const params = (options as any)?.params
+    const searchParams = (options as any)?.searchParams
+    const select = options?.select as ((data: TMapped) => unknown) | undefined
+    const enabled = options?.enabled !== false
 
     const key = queryCache.buildKey(path, params, searchParams)
     queryCache.getOrCreate(key, staleTime, gcTime)
     seedInitialData(key, params, searchParams)
-    queryCache.addSubscriber(key)
 
-    const entry = queryCache.get(key)!
-    if (entry.subscriberCount === 1) {
-      startInterval(key, params, searchParams)
-      startFocusListener(key, params, searchParams)
+    if (enabled) {
+      queryCache.addSubscriber(key)
+      const entry = queryCache.get(key)!
+      if (entry.subscriberCount === 1) {
+        startInterval(key, params, searchParams)
+        startFocusListener(key, params, searchParams)
+      }
+    }
+
+    function getCallbackState(): QueryState<any, E> {
+      const state = getState(key, params, searchParams)
+      if (select && state.data !== undefined) {
+        return { ...state, data: select(state.data as TMapped) }
+      }
+      return state
     }
 
     const unsub = notifier.subscribe(key, () => {
-      callback(getState(key, params, searchParams))
+      callback(getCallbackState())
     })
 
     // Initial notification
-    callback(getState(key, params, searchParams))
+    callback(getCallbackState())
 
     return () => {
       unsub()
-      queryCache.removeSubscriber(key)
-      const current = queryCache.get(key)
-      if (!current || current.subscriberCount <= 0) {
-        stopInterval(key)
-        stopFocusListener(key)
+      if (enabled) {
+        queryCache.removeSubscriber(key)
+        const current = queryCache.get(key)
+        if (!current || current.subscriberCount <= 0) {
+          stopInterval(key)
+          stopFocusListener(key)
+        }
       }
     }
   }
@@ -413,7 +433,15 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     return invoke({ params, searchParams })
   }
 
-  const callable = Object.assign(invoke, { subscribe, invalidate, refetch })
+  function cancel(options?: { params?: Record<string, string>; searchParams?: SearchParams }): void {
+    const params = options?.params
+    const searchParams = options?.searchParams
+    const key = queryCache.buildKey(path, params, searchParams)
+    queryCache.cancelInflight(key)
+    notifier.notify(key)
+  }
+
+  const callable = Object.assign(invoke, { subscribe, invalidate, refetch, cancel })
 
   // Attach reactive getters using default key (base path, no params)
   const defaultKey = queryCache.buildKey(path)

@@ -658,6 +658,232 @@ const getUsers = api.query({
 
 Fresh queries (within their `staleTime`) are not refetched on focus — only stale ones.
 
+## Select / Transform
+
+Use `select` on `subscribe` to derive a view from cached data without affecting the cache. Each subscriber can have its own select function.
+
+```typescript
+type User = { id: string; name: string; email: string }
+
+const getUsers = api.query({
+  key: '/users',
+  fn: () => fetchJson<User[]>('/api/users'),
+})
+
+// Subscriber that only sees user names
+getUsers.subscribe(
+  (state) => {
+    state.data // string[] | undefined
+  },
+  { select: (users) => users.map(u => u.name) },
+)
+
+// Subscriber that only sees the count
+getUsers.subscribe(
+  (state) => {
+    state.data // number | undefined
+  },
+  { select: (users) => users.length },
+)
+
+// Subscriber that sees IDs
+getUsers.subscribe(
+  (state) => {
+    state.data // string[] | undefined
+  },
+  { select: (users) => users.map(u => u.id) },
+)
+```
+
+The select function is only called when `data` is defined. When data is `undefined` (idle/loading), the subscriber receives `undefined` as usual. The cache always stores the full data — `select` is applied per-subscriber at notification time.
+
+## Enabled on Subscribe
+
+Pass `enabled: false` to `subscribe` to create a passive subscriber that receives state updates but doesn't contribute to subscriber count, interval refetching, or focus refetching.
+
+```typescript
+// Passive subscriber — watches for updates but doesn't trigger refetching
+const unsub = getUsers.subscribe(
+  (state) => { console.log(state.data) },
+  { enabled: false },
+)
+
+// Active subscriber (default) — counts toward subscriber total, enables intervals
+const unsub2 = getUsers.subscribe(
+  (state) => { renderUI(state) },
+  // enabled defaults to true
+)
+```
+
+This is useful when you want to observe query state from a component without influencing the refetch lifecycle. Passive subscribers still receive all notifications — they just don't cause the query to be kept alive for interval/focus refetching.
+
+`enabled` can be combined with `select`:
+
+```typescript
+getUsers.subscribe(
+  (state) => { console.log('Count:', state.data) },
+  { enabled: false, select: (users) => users.length },
+)
+```
+
+## Query Cancellation
+
+Cancel in-flight requests from outside the query using `cancel()` on the query callable or `cancelQuery()` on the client.
+
+```typescript
+// Cancel from the query callable
+const getUsers = api.query({
+  key: '/users',
+  fn: ({ signal }) => fetch('/api/users', { signal }).then(r => r.json()),
+})
+
+getUsers() // starts fetch
+getUsers.cancel() // aborts it
+
+// Cancel with params
+const getUser = api.query({
+  key: '/users/:id',
+  fn: ({ params, signal }) => fetch(`/api/users/${params.id}`, { signal }).then(r => r.json()),
+})
+
+getUser({ params: { id: '1' } })
+getUser.cancel({ params: { id: '1' } }) // cancel specific query
+
+// Cancel from the client
+api.cancelQuery('/users')
+api.cancelQuery('/users/:id', { params: { id: '1' } })
+```
+
+After cancellation, the query can be fetched again normally. Subscribers are notified immediately when a query is cancelled.
+
+## Infinite Queries / Pagination
+
+Use `infiniteQuery` for cursor-based pagination with automatic page merging.
+
+```typescript
+type Post = { id: string; title: string; cursor: string }
+
+const getPosts = api.infiniteQuery({
+  key: '/posts',
+  fn: ({ pageParam }) =>
+    fetch(`/api/posts?cursor=${pageParam ?? ''}`).then(r => r.json()) as Promise<Post[]>,
+  initialPageParam: null as string | null,
+  getNextPageParam: (lastPage) => {
+    const lastPost = lastPage[lastPage.length - 1]
+    return lastPost?.cursor || undefined
+  },
+})
+
+// Fetch first page
+const [result, err] = await getPosts()
+result.pages    // Post[][] — array of page arrays
+result.pageParams // unknown[] — page params used for each page
+
+// Fetch next page — appended to pages array
+await getPosts.fetchNextPage()
+
+// Fetch previous page — prepended to pages array
+await getPosts.fetchPreviousPage()
+```
+
+### Bidirectional Pagination
+
+```typescript
+const getMessages = api.infiniteQuery({
+  key: '/messages',
+  fn: ({ pageParam }) => fetchMessages(pageParam),
+  initialPageParam: 'latest',
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+  getPreviousPageParam: (firstPage) => firstPage.prevCursor,
+})
+
+await getMessages()
+await getMessages.fetchNextPage()     // newer messages
+await getMessages.fetchPreviousPage() // older messages
+```
+
+### Infinite Query State
+
+```typescript
+getPosts.subscribe((state) => {
+  state.data                  // { pages: Post[][], pageParams: unknown[] } | undefined
+  state.hasNextPage           // boolean
+  state.hasPreviousPage       // boolean
+  state.isFetching            // boolean
+  state.isFetchingNextPage    // boolean — true during fetchNextPage
+  state.isFetchingPreviousPage // boolean — true during fetchPreviousPage
+})
+```
+
+### Page Limits
+
+Use `maxPages` to cap the number of stored pages. When exceeded, the oldest pages are dropped (or newest, for backward fetching):
+
+```typescript
+const getPosts = api.infiniteQuery({
+  key: '/posts',
+  fn: ({ pageParam }) => fetchPosts(pageParam),
+  initialPageParam: null,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+  maxPages: 5, // only keep 5 pages in memory
+})
+```
+
+### Infinite Query Methods
+
+| Method | Description |
+|--------|-------------|
+| `fetchNextPage(options?)` | Fetch and append the next page |
+| `fetchPreviousPage(options?)` | Fetch and prepend the previous page |
+| `invalidate(options?)` | Invalidate the query |
+| `refetch(options?)` | Re-fetch all currently loaded pages |
+| `cancel(options?)` | Cancel the current page fetch |
+| `subscribe(callback, options?)` | Subscribe to state changes |
+
+## SSR / Hydration
+
+Transfer cache state from server to client using `dehydrate` and `hydrate`.
+
+### Server-Side
+
+```typescript
+// On the server — fetch data and dehydrate
+const serverApi = safeQuery<AppError>({ safe, staleTime: 30_000 })
+
+const getUsers = serverApi.query({
+  key: '/users',
+  fn: () => fetchJson<User[]>('/api/users'),
+})
+await getUsers()
+
+const dehydratedState = serverApi.dehydrate()
+// Serialize to JSON and embed in the HTML response
+const json = JSON.stringify(dehydratedState)
+```
+
+### Client-Side
+
+```typescript
+// On the client — hydrate from the server state
+const clientApi = safeQuery<AppError>({ safe, staleTime: 30_000 })
+clientApi.hydrate(JSON.parse(window.__DEHYDRATED_STATE__))
+
+// Queries now return hydrated data without refetching (if still fresh)
+const getUsers = clientApi.query({
+  key: '/users',
+  fn: () => fetchJson<User[]>('/api/users'),
+})
+const [users, err] = await getUsers()
+// Returns server-fetched data instantly — no network request
+```
+
+### Hydration Behavior
+
+- Hydrated data respects `staleTime` — if the data is still fresh, queries return it without refetching
+- Hydrate does **not** overwrite existing data that's newer than the hydrated data
+- Entity normalization runs during hydration if `entities` is configured
+- Subscribers are notified when hydrated data is applied
+
 ## Configuration
 
 | Option | Default | Description |
@@ -717,10 +943,14 @@ const getNotifications = api.query({
 |--------|-------------|
 | `query(config)` | Create a query callable |
 | `mutate(config)` | Create a mutation callable |
+| `infiniteQuery(config)` | Create an infinite query callable for pagination |
 | `getQueryData(path, options?)` | Read cached data for a query key |
 | `setQueryData(path, updater, options?)` | Write data to the cache for a query key |
+| `cancelQuery(path, options?)` | Cancel an in-flight query |
 | `invalidateByPrefix(prefix)` | Invalidate all queries whose key starts with `prefix` |
 | `invalidateAll()` | Invalidate every cached query |
+| `dehydrate()` | Serialize cache state for SSR transfer |
+| `hydrate(state)` | Restore serialized cache state |
 | `clear()` | Soft reset — clears cache and entity store |
 | `destroy()` | Hard teardown — clears all state and prevents further use |
 

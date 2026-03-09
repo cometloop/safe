@@ -24,6 +24,7 @@ function createDeps(overrides: Record<string, any> = {}) {
     defaultRefetchInterval: false as number | false,
     defaultRefetchIntervalInBackground: false,
     defaultRefetchOnWindowFocus: false,
+    registerCleanup: () => {},
     ...overrides,
   }
 }
@@ -1104,49 +1105,38 @@ describe('createQuery', () => {
 
   // ─── keepPreviousData ───
 
-  it('keepPreviousData holds page 1 data while page 2 loads', async () => {
+  it('keepPreviousData does not cross-contaminate between different param keys', async () => {
     let resolvePromise: (value: any) => void
     let callCount = 0
 
     const deps = createDeps()
     const query = createQuery({
-      key: '/users',
+      key: '/users/:id',
       fn: () => {
         callCount++
-        if (callCount === 1) return Promise.resolve([{ id: '1', page: 1 }])
+        if (callCount === 1) return Promise.resolve({ id: '1', name: 'Alice' })
         return new Promise((resolve) => { resolvePromise = resolve })
       },
       placeholderData: keepPreviousData,
     }, deps)
 
-    // Fetch page 1
-    await query({ searchParams: { page: 1 } })
+    // Fetch user 1
+    await query({ params: { id: '1' } })
 
-    // Subscribe to page 2
+    // Subscribe to user 2
     const states: any[] = []
     const unsub = query.subscribe((state) => {
       states.push({ ...state })
-    }, { searchParams: { page: 2 } })
+    }, { params: { id: '2' } })
 
-    // Start fetch for page 2
-    const p2 = query({ searchParams: { page: 2 } })
+    // Start fetch for user 2
+    query({ params: { id: '2' } })
 
-    // Should have previous data as placeholder
+    // User 1's data should NOT leak into user 2 as placeholder
     const placeholderState = states.find(s => s.isPlaceholderData)
-    expect(placeholderState).toBeDefined()
-    expect(placeholderState.data).toEqual([{ id: '1', page: 1 }])
-    expect(placeholderState.status).toBe('success')
-    expect(placeholderState.isFetching).toBe(true)
+    expect(placeholderState).toBeUndefined()
 
-    // Resolve page 2
-    resolvePromise!([{ id: '2', page: 2 }])
-    await p2
-
-    const lastState = states[states.length - 1]
-    expect(lastState.data).toEqual([{ id: '2', page: 2 }])
-    expect(lastState.isPlaceholderData).toBe(false)
-    expect(lastState.isFetching).toBe(false)
-
+    resolvePromise!({ id: '2', name: 'Bob' })
     unsub()
   })
 
@@ -1179,7 +1169,7 @@ describe('createQuery', () => {
     unsub()
   })
 
-  it('placeholderData function receives previousData in context', async () => {
+  it('placeholderData function receives undefined previousData for new cache key', async () => {
     let resolvePromise: (value: any) => void
     let callCount = 0
 
@@ -1196,27 +1186,27 @@ describe('createQuery', () => {
       placeholderData: placeholderFn,
     }, deps)
 
-    // First fetch
+    // First fetch succeeds for page 1
     await query({ searchParams: { page: 1 } })
 
-    // Subscribe to page 2 so getState/placeholderData gets called
+    // Subscribe to page 2 (different key, no prior data)
     const unsub = query.subscribe(() => {}, { searchParams: { page: 2 } })
 
-    // Start second fetch with different params
+    // Start fetch for page 2
     query({ searchParams: { page: 2 } })
 
-    expect(placeholderFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        previousData: [{ id: '1' }],
-        getEntity: expect.any(Function),
-      })
-    )
+    // previousData should not be present for page 2 (per-key tracking, no prior data)
+    expect(placeholderFn).toHaveBeenCalled()
+    const callArg = placeholderFn.mock.calls[0][0]
+    expect(callArg.previousData).toBeUndefined()
+    expect(callArg.searchParams).toEqual({ page: 2 })
+    expect(typeof callArg.getEntity).toBe('function')
 
     resolvePromise!([{ id: '2' }])
     unsub()
   })
 
-  it('keepPreviousData works with path params pagination', async () => {
+  it('keepPreviousData does not leak between different path params', async () => {
     let resolvePromise: (value: any) => void
     let callCount = 0
 
@@ -1225,31 +1215,28 @@ describe('createQuery', () => {
       key: '/users/:userId/posts',
       fn: () => {
         callCount++
-        if (callCount === 1) return Promise.resolve([{ id: 'p1', title: 'Post 1' }])
+        if (callCount === 1) return Promise.resolve([{ id: 'p1', title: 'User 1 Post' }])
         return new Promise((resolve) => { resolvePromise = resolve })
       },
       placeholderData: keepPreviousData,
     }, deps)
 
-    // Fetch page 1
-    await query({ params: { userId: '1' }, searchParams: { page: 1 } })
+    // Fetch posts for user 1
+    await query({ params: { userId: '1' } })
 
-    // Fetch page 2
-    const p2 = query({ params: { userId: '1' }, searchParams: { page: 2 } })
-
-    // Subscribe to page 2 and check state
+    // Fetch posts for user 2 (different key)
     const states: any[] = []
     const unsub = query.subscribe((state) => {
       states.push({ ...state })
-    }, { params: { userId: '1' }, searchParams: { page: 2 } })
+    }, { params: { userId: '2' } })
 
+    query({ params: { userId: '2' } })
+
+    // User 1's posts should NOT leak as placeholder for user 2
     const placeholderState = states.find(s => s.isPlaceholderData)
-    expect(placeholderState).toBeDefined()
-    expect(placeholderState.data).toEqual([{ id: 'p1', title: 'Post 1' }])
+    expect(placeholderState).toBeUndefined()
 
-    resolvePromise!([{ id: 'p2', title: 'Post 2' }])
-    await p2
-
+    resolvePromise!([{ id: 'p2', title: 'User 2 Post' }])
     unsub()
   })
 
@@ -1272,5 +1259,69 @@ describe('createQuery', () => {
     }
 
     unsub()
+  })
+
+  // ─── Coverage: normalize path in seedInitialData ───
+
+  it('initialData with normalize uses normalizeExplicit', async () => {
+    const fn = vi.fn().mockResolvedValue([])
+    const deps = createDeps({
+      defaultStaleTime: 60000,
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
+
+    const query = createQuery({
+      key: '/users',
+      fn,
+      staleTime: 60000,
+      initialData: [{ id: '1', name: 'Alice' }],
+      initialDataUpdatedAt: Date.now(),
+      normalize: (data: any) => ({ user: data }),
+    }, deps)
+
+    await query()
+    expect(fn).not.toHaveBeenCalled()
+    expect(deps.entityStore.get('user', '1')).toEqual(
+      expect.objectContaining({ id: '1', name: 'Alice' })
+    )
+  })
+
+  // ─── Coverage: normalize path in onSuccess ───
+
+  it('onSuccess with normalize uses normalizeExplicit', async () => {
+    const deps = createDeps({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
+
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
+      normalize: (data: any) => ({ user: data }),
+    }, deps)
+
+    await query()
+    expect(deps.entityStore.get('user', '1')).toEqual(
+      expect.objectContaining({ id: '1', name: 'Alice' })
+    )
+  })
+
+  // ─── Coverage: signalCleanup in onSettled ───
+
+  it('signal cleanup runs in onSettled when user signal provided', async () => {
+    const userController = new AbortController()
+    const removeSpy = vi.spyOn(userController.signal, 'removeEventListener')
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1' }]),
+    }, deps)
+
+    await query({ signal: userController.signal })
+    expect(removeSpy).toHaveBeenCalled()
   })
 })

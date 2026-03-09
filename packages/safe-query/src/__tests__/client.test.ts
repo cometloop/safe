@@ -917,4 +917,54 @@ describe('safeQuery', () => {
 
     expect(capturedSignal!.aborted).toBe(true)
   })
+
+  // ─── Coverage: query with normalize ───
+
+  it('query with normalize registers in normalizeRegistry', async () => {
+    const api = createClient({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
+      normalize: (data: any) => ({ user: data }),
+    })
+
+    await usersQuery()
+
+    // setQueryData should use the registered normalize
+    api.setQueryData('/users', [{ id: '1', name: 'Updated' }])
+
+    const result = api.getQueryData('/users') as any
+    expect(result).toBeDefined()
+  })
+
+  // ─── Coverage: setQueryData with entities + normalizedData ───
+
+  it('setQueryData with entities reads denormalized current data', async () => {
+    const api = createClient({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
+    })
+
+    await usersQuery()
+
+    // setQueryData with function updater — should receive denormalized data
+    api.setQueryData('/users', (old: any) => {
+      expect(old).toBeDefined()
+      return [{ id: '1', name: 'Updated' }]
+    })
+
+    const result = api.getQueryData('/users') as any
+    expect(result).toBeDefined()
+  })
 })

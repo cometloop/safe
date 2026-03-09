@@ -33,6 +33,7 @@ function createDeps(overrides: Record<string, any> = {}) {
     defaultRefetchInterval: false as number | false,
     defaultRefetchIntervalInBackground: false,
     defaultRefetchOnWindowFocus: false,
+    registerCleanup: () => {},
     ...overrides,
   }
 }

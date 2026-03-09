@@ -565,4 +565,31 @@ describe('EntityStore', () => {
       expect(result).toBeNull()
     })
   })
+
+  describe('version', () => {
+    it('version getter returns current version', () => {
+      const store = new EntityStore()
+      const v1 = store.version
+      expect(typeof v1).toBe('number')
+
+      store.set('user', '1', { name: 'Alice' })
+      // Version should increment on mutations
+      expect(store.version).toBeGreaterThanOrEqual(v1)
+    })
+  })
+
+  describe('denormalizeCached', () => {
+    it('denormalizeCached with primitive returns denormalized value', () => {
+      const store = new EntityStore()
+      // Non-object data goes through denormalize directly
+      const result = store.denormalizeCached('hello')
+      expect(result).toBe('hello')
+    })
+
+    it('denormalizeCached with null returns denormalized value', () => {
+      const store = new EntityStore()
+      const result = store.denormalizeCached(null)
+      expect(result).toBeNull()
+    })
+  })
 })

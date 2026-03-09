@@ -1,5 +1,24 @@
 import type { SafeInstance, SafeResult, RetryConfig } from '@cometloop/safe'
 
+// ─── Infinite Data ───
+
+export type InfiniteData<TData> = {
+  pages: TData[]
+  pageParams: unknown[]
+}
+
+// ─── Dehydration / Hydration ───
+
+export type DehydratedQuery = {
+  key: string
+  data: unknown
+  dataUpdatedAt: number | null
+}
+
+export type DehydratedState = {
+  queries: DehydratedQuery[]
+}
+
 // ─── Path Param Extraction ───
 
 export type ExtractPathParams<T extends string> =
@@ -88,6 +107,13 @@ export class QueryDisabledError extends Error {
   constructor() {
     super('Query is disabled')
     this.name = 'QueryDisabledError'
+  }
+}
+
+export class QueryAbortedError extends Error {
+  constructor() {
+    super('Query was aborted due to a newer request')
+    this.name = 'QueryAbortedError'
   }
 }
 
@@ -225,7 +251,7 @@ export type MutationConfig<
 export type QueryInvokeOptions<TPath extends string> =
   [HasPathParams<TPath>] extends [true]
     ? { params: PathParams<TPath>; searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean }
-    : { searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean } | void
+    : { searchParams?: SearchParams; signal?: AbortSignal; enabled?: boolean }
 
 export type MutationInvokeOptions<TPath extends string, TBody> =
   { searchParams?: SearchParams; signal?: AbortSignal }
@@ -235,18 +261,30 @@ export type MutationInvokeOptions<TPath extends string, TBody> =
 export type KeyOptions<TPath extends string> =
   [HasPathParams<TPath>] extends [true]
     ? { params: PathParams<TPath>; searchParams?: SearchParams }
-    : { searchParams?: SearchParams } | void
+    : { searchParams?: SearchParams }
 
 // ─── Callable Types ───
 
+export type SubscribeOptions<TPath extends string, TData = unknown, TSelected = TData> = KeyOptions<TPath> & {
+  select?: (data: TData) => TSelected
+  enabled?: boolean
+}
+
 export type QueryCallable<TData, TError, TPath extends string> = {
   (options?: QueryInvokeOptions<TPath> & LifecycleCallbacks<TData, TError>): Promise<SafeResult<TData, TError>>
-  subscribe: (
-    callback: (state: QueryState<TData, TError>) => void,
-    options?: KeyOptions<TPath> extends void ? void : KeyOptions<TPath>
-  ) => () => void
-  invalidate: (options?: KeyOptions<TPath> extends void ? void : KeyOptions<TPath>) => void
-  refetch: (options?: KeyOptions<TPath> extends void ? void : KeyOptions<TPath>) => Promise<SafeResult<TData, TError>>
+  subscribe: {
+    <TSelected = TData>(
+      callback: (state: QueryState<TSelected, TError>) => void,
+      options: SubscribeOptions<TPath, TData, TSelected> & { select: (data: TData) => TSelected },
+    ): () => void
+    (
+      callback: (state: QueryState<TData, TError>) => void,
+      options?: SubscribeOptions<TPath, TData, TData>,
+    ): () => void
+  }
+  invalidate: (options?: KeyOptions<TPath>) => void
+  refetch: (options?: KeyOptions<TPath>) => Promise<SafeResult<TData, TError>>
+  cancel: (options?: KeyOptions<TPath>) => void
   readonly status: QueryState<TData, TError>['status']
   readonly data: TData | undefined
   readonly error: TError | null
@@ -272,3 +310,72 @@ export type MutationCallable<TData, TError, TPath extends string, TBody> = {
 export type Subscriber<TData, TError> = (
   state: QueryState<TData, TError>
 ) => void
+
+// ─── Infinite Query Types ───
+
+export type InfiniteQueryFnContext<TPath extends string> = QueryFnContext<TPath> & {
+  pageParam: unknown
+}
+
+export type InfiniteQueryConfig<
+  TData,
+  TPath extends string = string,
+  TParsed = TData,
+  TMapped = TParsed,
+  TEntities extends GlobalEntityConfig = GlobalEntityConfig,
+> = {
+  key: TPath
+  fn: (context: InfiniteQueryFnContext<TPath>) => Promise<TData>
+  initialPageParam: unknown
+  getNextPageParam: (lastPage: TMapped, allPages: TMapped[]) => unknown | undefined
+  getPreviousPageParam?: (firstPage: TMapped, allPages: TMapped[]) => unknown | undefined
+  parseResponse?: (data: TData) => TParsed
+  normalize?: NormalizeFn<TMapped, TEntities>
+  staleTime?: number
+  gcTime?: number
+  retry?: RetryConfig
+  maxPages?: number
+  refetchInterval?: number | false
+  refetchIntervalInBackground?: boolean
+  refetchOnWindowFocus?: boolean
+} & LifecycleCallbacks<InfiniteData<TMapped>>
+  & ([TMapped] extends [TParsed]
+    ? [TParsed] extends [TMapped]
+      ? { mapToEntities?: (data: TParsed) => TMapped }
+      : { mapToEntities: (data: TParsed) => TMapped }
+    : { mapToEntities: (data: TParsed) => TMapped })
+
+export type InfiniteQueryState<TData, TError> = {
+  data: InfiniteData<TData> | undefined
+  error: TError | null
+  status: 'idle' | 'loading' | 'success' | 'error'
+  isFetching: boolean
+  isFetchingNextPage: boolean
+  isFetchingPreviousPage: boolean
+  hasNextPage: boolean
+  hasPreviousPage: boolean
+  isStale: boolean
+  dataUpdatedAt: number | null
+}
+
+export type InfiniteQueryCallable<TData, TError, TPath extends string> = {
+  (options?: QueryInvokeOptions<TPath>): Promise<SafeResult<InfiniteData<TData>, TError>>
+  subscribe: (
+    callback: (state: InfiniteQueryState<TData, TError>) => void,
+    options?: KeyOptions<TPath> & { enabled?: boolean },
+  ) => () => void
+  fetchNextPage: (options?: KeyOptions<TPath>) => Promise<SafeResult<InfiniteData<TData>, TError>>
+  fetchPreviousPage: (options?: KeyOptions<TPath>) => Promise<SafeResult<InfiniteData<TData>, TError>>
+  invalidate: (options?: KeyOptions<TPath>) => void
+  refetch: (options?: KeyOptions<TPath>) => Promise<SafeResult<InfiniteData<TData>, TError>>
+  cancel: (options?: KeyOptions<TPath>) => void
+  readonly status: InfiniteQueryState<TData, TError>['status']
+  readonly data: InfiniteData<TData> | undefined
+  readonly error: TError | null
+  readonly isFetching: boolean
+  readonly isFetchingNextPage: boolean
+  readonly isFetchingPreviousPage: boolean
+  readonly hasNextPage: boolean
+  readonly hasPreviousPage: boolean
+  readonly isStale: boolean
+}
