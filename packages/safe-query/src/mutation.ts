@@ -115,14 +115,17 @@ export function createMutation<
         notifier.notifyMany(affectedQueryKeys)
       }
     } else if (opt && method === 'DELETE') {
-      entityStore.beginOptimistic(opt.entityType, opt.entityId)
-      didOptimistic = true
-      affectedQueryKeys = entityStore.getQueriesForEntity(
-        opt.entityType,
-        opt.entityId
-      )
-      entityStore.delete(opt.entityType, opt.entityId)
-      notifier.notifyMany(affectedQueryKeys)
+      const existing = entityStore.get(opt.entityType, opt.entityId)
+      if (existing) {
+        entityStore.beginOptimistic(opt.entityType, opt.entityId)
+        didOptimistic = true
+        affectedQueryKeys = entityStore.getQueriesForEntity(
+          opt.entityType,
+          opt.entityId
+        )
+        entityStore.delete(opt.entityType, opt.entityId)
+        notifier.notifyMany(affectedQueryKeys)
+      }
     }
 
     return safeInstance.async<TData, TMapped>(

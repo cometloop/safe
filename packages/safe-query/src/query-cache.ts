@@ -24,7 +24,7 @@ export class QueryCache {
       const sorted = Object.entries(params).sort(([a], [b]) =>
         a.localeCompare(b)
       )
-      key += `?${sorted.map(([k, v]) => `${k}=${v}`).join('&')}`
+      key += `?${sorted.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`
     }
     if (searchParams) {
       const sorted = Object.entries(searchParams).sort(([a], [b]) =>
@@ -34,10 +34,10 @@ export class QueryCache {
       for (const [k, v] of sorted) {
         if (Array.isArray(v)) {
           for (const item of v) {
-            parts.push(`~${k}=${String(item)}`)
+            parts.push(`~${encodeURIComponent(k)}=${encodeURIComponent(String(item))}`)
           }
         } else {
-          parts.push(`~${k}=${String(v)}`)
+          parts.push(`~${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
         }
       }
       if (parts.length > 0) {

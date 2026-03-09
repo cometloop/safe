@@ -738,6 +738,32 @@ describe('createMutation', () => {
     expect(capturedSignal!.aborted).toBe(true)
   })
 
+  it('skips optimistic delete when entity not in store', async () => {
+    const fn = vi.fn().mockResolvedValue(undefined)
+
+    const deps = createDeps({ enableOptimisticUpdates: true })
+
+    // Don't pre-populate entity store - entity doesn't exist
+    const beginSpy = vi.spyOn(deps.entityStore, 'beginOptimistic')
+    const deleteSpy = vi.spyOn(deps.entityStore, 'delete')
+    const notifySpy = vi.spyOn(deps.notifier, 'notifyMany')
+
+    const mutation = createMutation({
+      key: '/users/:id',
+      fn,
+      method: 'DELETE',
+      entities: { user: (u: any) => u.id },
+    }, deps)
+
+    const [, err] = await mutation({ params: { id: '1' } })
+    expect(err).toBeNull()
+
+    // Should not have performed any optimistic tracking
+    expect(beginSpy).not.toHaveBeenCalled()
+    expect(deleteSpy).not.toHaveBeenCalled()
+    expect(notifySpy).not.toHaveBeenCalled()
+  })
+
   it('concurrent optimistic mutations: first fails while second in-flight notifies queries', async () => {
     let reject1: (e: any) => void
     let resolve2: (v: any) => void

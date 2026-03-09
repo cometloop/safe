@@ -91,6 +91,32 @@ describe('QueryCache', () => {
         cache.buildKey('/users', undefined, { tag: ['a', 'b'], sort: 'name' })
       ).toBe('/users?~sort=name&~tag=a&~tag=b')
     })
+
+    it('encodes special characters in param values to avoid key collisions', () => {
+      const cache = new QueryCache()
+      const key1 = cache.buildKey('/path', { a: '1&b=2' })
+      const key2 = cache.buildKey('/path', { a: '1', b: '2' })
+      expect(key1).not.toBe(key2)
+    })
+
+    it('encodes special characters in param keys', () => {
+      const cache = new QueryCache()
+      const key = cache.buildKey('/path', { 'a&b': 'value' })
+      expect(key).toBe('/path?a%26b=value')
+    })
+
+    it('encodes special characters in search param values', () => {
+      const cache = new QueryCache()
+      const key1 = cache.buildKey('/path', undefined, { a: '1&b=2' })
+      const key2 = cache.buildKey('/path', undefined, { a: '1', b: '2' })
+      expect(key1).not.toBe(key2)
+    })
+
+    it('encodes special characters in array search param values', () => {
+      const cache = new QueryCache()
+      const key = cache.buildKey('/path', undefined, { tag: ['a=1', 'b&c'] })
+      expect(key).toBe('/path?~tag=a%3D1&~tag=b%26c')
+    })
   })
 
   describe('getOrCreate', () => {
