@@ -564,7 +564,7 @@ describe('safeQuery', () => {
     })
 
     await createUser({ body: {} })
-    expect(onSuccess).toHaveBeenCalledWith({ id: '1' })
+    expect(onSuccess).toHaveBeenCalledWith({ id: '1' }, undefined)
   })
 
   it('mutation config-level onError is called', async () => {
@@ -579,7 +579,8 @@ describe('safeQuery', () => {
 
     await createUser({ body: {} })
     expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'UNKNOWN' })
+      expect.objectContaining({ code: 'UNKNOWN' }),
+      undefined
     )
   })
 
@@ -695,6 +696,203 @@ describe('safeQuery', () => {
     const lastState = states[states.length - 1]
     expect(lastState.status).toBe('success')
     expect(lastState.data).toEqual({ id: '1', name: 'Alice' })
+  })
+
+  // ─── getQueryData ───
+
+  it('getQueryData returns undefined for uncached key', () => {
+    const api = createClient()
+    expect(api.getQueryData('/users')).toBeUndefined()
+  })
+
+  it('getQueryData returns cached data after fetch', async () => {
+    const api = createClient({ staleTime: 30000 })
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
+    })
+
+    await usersQuery()
+    expect(api.getQueryData('/users')).toEqual([{ id: '1', name: 'Alice' }])
+  })
+
+  it('getQueryData works with params', async () => {
+    const api = createClient({ staleTime: 30000 })
+    const userQuery = api.query({
+      key: '/users/:id',
+      fn: () => Promise.resolve({ id: '1', name: 'Alice' }),
+    })
+
+    await userQuery({ params: { id: '1' } })
+    expect(api.getQueryData('/users/:id', { params: { id: '1' } })).toEqual({
+      id: '1',
+      name: 'Alice',
+    })
+    expect(api.getQueryData('/users/:id', { params: { id: '2' } })).toBeUndefined()
+  })
+
+  it('getQueryData works with searchParams', async () => {
+    const api = createClient({ staleTime: 30000 })
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1' }]),
+    })
+
+    await usersQuery({ searchParams: { page: 1 } })
+    expect(api.getQueryData('/users', { searchParams: { page: 1 } })).toEqual([{ id: '1' }])
+    expect(api.getQueryData('/users', { searchParams: { page: 2 } })).toBeUndefined()
+  })
+
+  it('getQueryData denormalizes entities', async () => {
+    const api = safeQuery({
+      safe: createSafe<AppError>({
+        parseError: (e) => ({ code: 'UNKNOWN', message: String(e) }),
+        defaultError: { code: 'UNKNOWN', message: 'Unknown' },
+      }),
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+      staleTime: 30000,
+    })
+
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
+    })
+
+    await usersQuery()
+    const data = api.getQueryData<Array<{ id: string; name: string }>>('/users')
+    expect(data).toEqual([{ id: '1', name: 'Alice' }])
+  })
+
+  it('getQueryData throws after destroy', () => {
+    const api = createClient()
+    api.destroy()
+    expect(() => api.getQueryData('/users')).toThrow('SafeQueryClient has been destroyed')
+  })
+
+  // ─── setQueryData ───
+
+  it('setQueryData writes data to cache', () => {
+    const api = createClient()
+    api.setQueryData('/users', [{ id: '1', name: 'Alice' }])
+    expect(api.getQueryData('/users')).toEqual([{ id: '1', name: 'Alice' }])
+  })
+
+  it('setQueryData with updater function', async () => {
+    const api = createClient({ staleTime: 30000 })
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1', name: 'Alice' }]),
+    })
+
+    await usersQuery()
+
+    api.setQueryData<Array<{ id: string; name: string }>>('/users', (old) =>
+      old ? [...old, { id: '2', name: 'Bob' }] : [{ id: '2', name: 'Bob' }]
+    )
+
+    expect(api.getQueryData('/users')).toEqual([
+      { id: '1', name: 'Alice' },
+      { id: '2', name: 'Bob' },
+    ])
+  })
+
+  it('setQueryData updater receives undefined when no cached data', () => {
+    const api = createClient()
+    const updater = vi.fn().mockReturnValue([{ id: '1' }])
+    api.setQueryData('/users', updater)
+    expect(updater).toHaveBeenCalledWith(undefined)
+  })
+
+  it('setQueryData does nothing when updater returns undefined', () => {
+    const api = createClient()
+    api.setQueryData('/users', [{ id: '1' }])
+    api.setQueryData('/users', () => undefined)
+    // Should still have original data
+    expect(api.getQueryData('/users')).toEqual([{ id: '1' }])
+  })
+
+  it('setQueryData notifies subscribers', async () => {
+    const api = createClient({ staleTime: 30000 })
+    const usersQuery = api.query({
+      key: '/users',
+      fn: () => Promise.resolve([{ id: '1' }]),
+    })
+
+    await usersQuery()
+
+    const states: any[] = []
+    const unsub = usersQuery.subscribe((state) => states.push({ ...state }))
+    states.length = 0
+
+    api.setQueryData('/users', [{ id: '1' }, { id: '2' }])
+
+    expect(states.length).toBeGreaterThan(0)
+    const lastState = states[states.length - 1]
+    expect(lastState.data).toEqual([{ id: '1' }, { id: '2' }])
+    expect(lastState.status).toBe('success')
+
+    unsub()
+  })
+
+  it('setQueryData works with params', () => {
+    const api = createClient()
+    api.setQueryData('/users/:id', { id: '1', name: 'Alice' }, { params: { id: '1' } })
+    expect(api.getQueryData('/users/:id', { params: { id: '1' } })).toEqual({
+      id: '1',
+      name: 'Alice',
+    })
+  })
+
+  it('setQueryData works with searchParams', () => {
+    const api = createClient()
+    api.setQueryData('/users', [{ id: '1' }], { searchParams: { page: 1 } })
+    expect(api.getQueryData('/users', { searchParams: { page: 1 } })).toEqual([{ id: '1' }])
+    expect(api.getQueryData('/users', { searchParams: { page: 2 } })).toBeUndefined()
+  })
+
+  it('setQueryData normalizes entities when entities configured', () => {
+    const api = safeQuery({
+      safe: createSafe<AppError>({
+        parseError: (e) => ({ code: 'UNKNOWN', message: String(e) }),
+        defaultError: { code: 'UNKNOWN', message: 'Unknown' },
+      }),
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
+
+    api.setQueryData('/users', [
+      { id: '1', name: 'Alice' },
+      { id: '2', name: 'Bob' },
+    ])
+
+    const data = api.getQueryData<Array<{ id: string; name: string }>>('/users')
+    expect(data).toEqual([
+      { id: '1', name: 'Alice' },
+      { id: '2', name: 'Bob' },
+    ])
+  })
+
+  it('setQueryData makes data available to subsequent query calls', async () => {
+    const fn = vi.fn().mockResolvedValue([{ id: '1', name: 'Server' }])
+    const api = createClient({ staleTime: 30000 })
+    const usersQuery = api.query({ key: '/users', fn })
+
+    // Pre-populate cache
+    api.setQueryData('/users', [{ id: '1', name: 'Prefetched' }])
+
+    // Query should return cached data without fetching
+    const [result] = await usersQuery()
+    expect(fn).not.toHaveBeenCalled()
+    expect(result).toEqual([{ id: '1', name: 'Prefetched' }])
+  })
+
+  it('setQueryData throws after destroy', () => {
+    const api = createClient()
+    api.destroy()
+    expect(() => api.setQueryData('/users', [])).toThrow('SafeQueryClient has been destroyed')
   })
 
   // ─── destroy cancels in-flight queries ───

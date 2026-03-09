@@ -48,15 +48,19 @@ describe('EntityStore', () => {
   describe('normalize', () => {
     it('normalizes a single entity', () => {
       const store = new EntityStore()
-      const data = { __type: 'user', id: '1', name: 'Alice' }
-      const extractors = { user: (u: any) => u.id }
+      const data = { id: '1', name: 'Alice' }
+      const extractors = {
+        user: {
+          match: (obj: Record<string, unknown>) => 'name' in obj,
+          id: (u: any) => u.id,
+        },
+      }
 
       const { normalized, entityKeys } = store.normalize(data, extractors)
 
       expect(normalized).toEqual({ __ref: 'user:1' })
       expect(entityKeys).toEqual(new Set(['user:1']))
       expect(store.get('user', '1')).toEqual({
-        __type: 'user',
         id: '1',
         name: 'Alice',
       })
@@ -65,10 +69,15 @@ describe('EntityStore', () => {
     it('normalizes an array of entities', () => {
       const store = new EntityStore()
       const data = [
-        { __type: 'user', id: '1', name: 'Alice' },
-        { __type: 'user', id: '2', name: 'Bob' },
+        { id: '1', name: 'Alice' },
+        { id: '2', name: 'Bob' },
       ]
-      const extractors = { user: (u: any) => u.id }
+      const extractors = {
+        user: {
+          match: (obj: Record<string, unknown>) => 'name' in obj,
+          id: (u: any) => u.id,
+        },
+      }
 
       const { normalized, entityKeys } = store.normalize(data, extractors)
 
@@ -82,13 +91,20 @@ describe('EntityStore', () => {
     it('normalizes nested entities', () => {
       const store = new EntityStore()
       const data = {
-        __type: 'post',
         id: 'p1',
-        author: { __type: 'user', id: 'u1', name: 'Alice' },
+        title: 'Hello World',
+        author: { id: 'u1', name: 'Alice', email: 'alice@example.com' },
       }
       const extractors = {
-        post: (p: any) => p.id,
-        user: (u: any) => u.id,
+        post: {
+          match: (obj: Record<string, unknown>) => 'title' in obj,
+          id: (p: any) => p.id,
+        },
+        user: {
+          match: (obj: Record<string, unknown>) =>
+            'email' in obj && !('title' in obj),
+          id: (u: any) => u.id,
+        },
       }
 
       const { normalized, entityKeys } = store.normalize(data, extractors)
@@ -96,14 +112,14 @@ describe('EntityStore', () => {
       expect(normalized).toEqual({ __ref: 'post:p1' })
       expect(entityKeys).toEqual(new Set(['post:p1', 'user:u1']))
       expect(store.get('post', 'p1')).toEqual({
-        __type: 'post',
         id: 'p1',
+        title: 'Hello World',
         author: { __ref: 'user:u1' },
       })
       expect(store.get('user', 'u1')).toEqual({
-        __type: 'user',
         id: 'u1',
         name: 'Alice',
+        email: 'alice@example.com',
       })
     })
 
@@ -119,11 +135,101 @@ describe('EntityStore', () => {
       expect(store.normalize('hello', {}).normalized).toBe('hello')
     })
 
-    it('handles objects without __type', () => {
+    it('passes through objects that match no extractor', () => {
       const store = new EntityStore()
       const data = { id: '1', name: 'Alice' }
-      const { normalized } = store.normalize(data, {})
+      const extractors = {
+        post: {
+          match: (obj: Record<string, unknown>) => 'title' in obj,
+          id: (p: any) => p.id,
+        },
+      }
+      const { normalized } = store.normalize(data, extractors)
       expect(normalized).toEqual({ id: '1', name: 'Alice' })
+    })
+
+    it('matches entities by shape without __type', () => {
+      const store = new EntityStore()
+      const data = [
+        { id: '1', title: 'Post 1', body: 'Content' },
+        { id: '2', name: 'Alice', email: 'alice@test.com' },
+      ]
+      const extractors = {
+        post: {
+          match: (obj: Record<string, unknown>) => 'title' in obj,
+          id: (p: any) => p.id,
+        },
+        user: {
+          match: (obj: Record<string, unknown>) => 'email' in obj,
+          id: (u: any) => u.id,
+        },
+      }
+
+      const { normalized, entityKeys } = store.normalize(data, extractors)
+
+      expect(normalized).toEqual([
+        { __ref: 'post:1' },
+        { __ref: 'user:2' },
+      ])
+      expect(entityKeys).toEqual(new Set(['post:1', 'user:2']))
+      expect(store.get('post', '1')).toEqual({
+        id: '1',
+        title: 'Post 1',
+        body: 'Content',
+      })
+      expect(store.get('user', '2')).toEqual({
+        id: '2',
+        name: 'Alice',
+        email: 'alice@test.com',
+      })
+    })
+
+    it('no match passes object through unchanged', () => {
+      const store = new EntityStore()
+      const data = { foo: 'bar', baz: 42 }
+      const extractors = {
+        user: {
+          match: (obj: Record<string, unknown>) => 'email' in obj,
+          id: (u: any) => u.id,
+        },
+        post: {
+          match: (obj: Record<string, unknown>) => 'title' in obj,
+          id: (p: any) => p.id,
+        },
+      }
+
+      const { normalized, entityKeys } = store.normalize(data, extractors)
+
+      expect(normalized).toEqual({ foo: 'bar', baz: 42 })
+      expect(entityKeys).toEqual(new Set())
+    })
+
+    it('normalizeExplicit stores entities from user-provided map', () => {
+      const store = new EntityStore()
+      const extractors = {
+        user: {
+          match: (obj: Record<string, unknown>) => 'name' in obj,
+          id: (u: any) => u.id,
+        },
+        post: {
+          match: (obj: Record<string, unknown>) => 'title' in obj,
+          id: (p: any) => p.id,
+        },
+      }
+      const entityMap = {
+        user: [
+          { id: 'u1', name: 'Alice' },
+          { id: 'u2', name: 'Bob' },
+        ],
+        post: { id: 'p1', title: 'Hello' },
+      }
+
+      const entityKeys = store.normalizeExplicit(entityMap, extractors)
+
+      expect(entityKeys).toEqual(new Set(['user:u1', 'user:u2', 'post:p1']))
+      expect(store.get('user', 'u1')).toEqual({ id: 'u1', name: 'Alice' })
+      expect(store.get('user', 'u2')).toEqual({ id: 'u2', name: 'Bob' })
+      expect(store.get('post', 'p1')).toEqual({ id: 'p1', title: 'Hello' })
     })
   })
 
@@ -420,10 +526,11 @@ describe('EntityStore', () => {
       const result1 = store.endOptimistic('user', '1', false)
       expect(result1).toBeNull() // counter still > 0
 
-      // Second settles with success → but hadError is true, so rollback
+      // Second settles with success → hadError is true but last succeeded,
+      // so keep current data (no rollback) and return keys for invalidation
       const result2 = store.endOptimistic('user', '1', true)
       expect(result2).toEqual(new Set(['q1']))
-      expect(store.get('user', '1')).toEqual({ name: 'Alice' })
+      expect(store.get('user', '1')).toEqual({ name: 'Charlie' })
     })
 
     it('returns null when endOptimistic called without beginOptimistic', () => {

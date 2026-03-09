@@ -189,24 +189,28 @@ describe('Type inference', () => {
 
   it('query with mapToEntities returns TMapped type', async () => {
     type ApiUser = { type: string; id: string; name: string }
-    type NormalizedUser = { __type: 'user'; id: string; name: string; type: string }
+    type EnrichedUser = ApiUser & { displayName: string }
 
-    const usersQuery = api.query({
+    const apiWithEntities = safeQuery<AppError>({
+      safe,
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
+
+    const usersQuery = apiWithEntities.query({
       key: '/users',
       fn: (): Promise<ApiUser[]> =>
         Promise.resolve([{ type: 'user', id: '1', name: 'Alice' }]),
-      mapToEntities: (users): NormalizedUser[] =>
-        users.map(u => ({ ...u, __type: 'user' as const })),
-      entities: {
-        user: (u: NormalizedUser) => u.id,
-      },
+      mapToEntities: (users): EnrichedUser[] =>
+        users.map(u => ({ ...u, displayName: u.name.toUpperCase() })),
     })
 
     const [users, err] = await usersQuery()
     if (!err) {
-      // users is typed as NormalizedUser[]
-      const first: NormalizedUser | undefined = users[0]
-      expect(first?.__type).toBe('user')
+      // users is typed as EnrichedUser[]
+      const first: EnrichedUser | undefined = users[0]
+      expect(first?.displayName).toBe('ALICE')
       expect(first?.name).toBe('Alice')
     }
   })

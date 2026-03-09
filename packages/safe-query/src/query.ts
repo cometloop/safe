@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext, DataFnContext, LifecycleCallbacks } from './types'
+import type { QueryConfig, QueryState, QueryCallable, SearchParams, QueryFnContext, DataFnContext, LifecycleCallbacks, GlobalEntityConfig } from './types'
 import { QueryDisabledError } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
@@ -11,6 +11,7 @@ export type QueryDeps<E> = {
   queryCache: QueryCache
   entityStore: EntityStore
   notifier: Notifier
+  entities?: GlobalEntityConfig
   defaultStaleTime: number
   defaultGcTime: number
   focusManager: FocusManager
@@ -42,7 +43,8 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
   const gcTime = config.gcTime ?? defaultGcTime
   const parseResponse = config.parseResponse
   const mapToEntities = config.mapToEntities
-  const entities = config.entities
+  const entities = deps.entities
+  const normalize = config.normalize
   const retry = config.retry
   const configOnSuccess = config.onSuccess
   const configOnError = config.onError
@@ -58,6 +60,9 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
 
   const intervalTimers = new Map<string, ReturnType<typeof setInterval>>()
   const focusUnsubs = new Map<string, () => void>()
+
+  // Track last successful data across all keys for keepPreviousData support
+  let lastSuccessfulData: TMapped | undefined = undefined
 
   // When mapToEntities is absent, TMapped = TParsed by type constraint (see QueryConfig).
   // The cast is safe because the conditional type on QueryConfig requires mapToEntities
@@ -79,24 +84,26 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     }
   }
 
-  function buildDataFnContext(params?: Record<string, string>, searchParams?: SearchParams): DataFnContext<TPath> {
+  function buildDataFnContext(params?: Record<string, string>, searchParams?: SearchParams, previousData?: TMapped): DataFnContext<TPath, TMapped> {
     const ctx: Record<string, unknown> = {
       getEntity: (type: string, id: string) => entityStore.get(type, id),
     }
     if (params) ctx.params = params
     if (searchParams) ctx.searchParams = searchParams
-    return ctx as DataFnContext<TPath>
+    if (previousData !== undefined) ctx.previousData = previousData
+    return ctx as DataFnContext<TPath, TMapped>
   }
 
   function resolveDataOption(
-    option: TMapped | ((context: DataFnContext<TPath>) => TMapped | undefined) | undefined,
+    option: TMapped | ((context: DataFnContext<TPath, TMapped>) => TMapped | undefined) | undefined,
     params?: Record<string, string>,
     searchParams?: SearchParams,
+    previousData?: TMapped,
   ): TMapped | undefined {
     if (option === undefined) return undefined
     if (typeof option === 'function') {
-      return (option as (ctx: DataFnContext<TPath>) => TMapped | undefined)(
-        buildDataFnContext(params, searchParams),
+      return (option as (ctx: DataFnContext<TPath, TMapped>) => TMapped | undefined)(
+        buildDataFnContext(params, searchParams, previousData),
       )
     }
     return option
@@ -109,12 +116,14 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     const resolved = resolveDataOption(initialData, params, searchParams)
     if (resolved === undefined) return
 
-    if (entities) {
-      const { normalized, entityKeys } = entityStore.normalize(
-        resolved,
-        entities as Record<string, (entity: any) => string>,
-      )
-      queryCache.setData(key, resolved, normalized, entityKeys)
+    if (normalize && entities) {
+      const entityMap = normalize(resolved as TMapped)
+      const entityKeys = entityStore.normalizeExplicit(entityMap, entities)
+      queryCache.setData(key, resolved, resolved, entityKeys)
+      entityStore.registerQueryEntities(key, entityKeys)
+    } else if (entities) {
+      const { normalized: normalizedData, entityKeys } = entityStore.normalize(resolved, entities)
+      queryCache.setData(key, resolved, normalizedData, entityKeys)
       entityStore.registerQueryEntities(key, entityKeys)
     } else {
       queryCache.setData(key, resolved, undefined, new Set())
@@ -147,7 +156,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
 
     let data: TMapped | undefined
     if (entry.normalizedData !== undefined && entities) {
-      data = entityStore.denormalize(entry.normalizedData) as TMapped
+      data = entityStore.denormalizeCached(entry.normalizedData) as TMapped
     } else {
       data = entry.data as TMapped | undefined
     }
@@ -169,7 +178,7 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     // Placeholder injection: only when no real data and fetch in progress
     let isPlaceholderData = false
     if (data === undefined && entry.inflightPromise !== null && placeholderData !== undefined) {
-      const resolved = resolveDataOption(placeholderData, params, searchParams)
+      const resolved = resolveDataOption(placeholderData, params, searchParams, lastSuccessfulData)
       if (resolved !== undefined) {
         data = resolved
         isPlaceholderData = true
@@ -230,12 +239,15 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
     entry.abortController = controller
 
     // Link user-provided signal
+    let signalCleanup: (() => void) | null = null
     const userSignal = options?.signal
     if (userSignal) {
       if (userSignal.aborted) {
         controller.abort(userSignal.reason)
       } else {
-        userSignal.addEventListener('abort', () => controller.abort(userSignal.reason), { once: true })
+        const handler = () => controller.abort(userSignal.reason)
+        userSignal.addEventListener('abort', handler, { once: true })
+        signalCleanup = () => userSignal.removeEventListener('abort', handler)
       }
     }
 
@@ -252,12 +264,17 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
           // Check generation to discard stale responses
           if (entry.generation !== generation) return
 
-          if (entities) {
-            const { normalized, entityKeys } = entityStore.normalize(
-              result,
-              entities as Record<string, (entity: any) => string>
-            )
-            queryCache.setData(key, result, normalized, entityKeys)
+          // Track last successful data for keepPreviousData
+          lastSuccessfulData = result
+
+          if (normalize && entities) {
+            const entityMap = normalize(result)
+            const entityKeys = entityStore.normalizeExplicit(entityMap, entities)
+            queryCache.setData(key, result, result, entityKeys)
+            entityStore.registerQueryEntities(key, entityKeys)
+          } else if (entities) {
+            const { normalized: normalizedData, entityKeys } = entityStore.normalize(result, entities)
+            queryCache.setData(key, result, normalizedData, entityKeys)
             entityStore.registerQueryEntities(key, entityKeys)
           } else {
             queryCache.setData(key, result, undefined, new Set())
@@ -274,6 +291,10 @@ export function createQuery<TData, E, TPath extends string, TParsed = TData, TMa
           invokeOnError?.(error as E)
         },
         onSettled: () => {
+          if (signalCleanup) {
+            signalCleanup()
+            signalCleanup = null
+          }
           if (entry.generation !== generation) return
           entry.inflightPromise = null
           entry.abortController = null

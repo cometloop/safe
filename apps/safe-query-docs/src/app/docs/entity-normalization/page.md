@@ -32,8 +32,8 @@ Entity normalization solves this automatically.
 
 The normalization system has three parts:
 
-1. **Entity identification** — Entities are plain objects with a `__type` field. An **extractor** function returns a unique ID for each entity.
-2. **Normalize** — When query data arrives, the normalizer walks the data recursively, finds every entity (object with `__type`), stores it in a central **EntityStore**, and replaces it in the query data with a lightweight reference (`{ __ref: "type:id" }`).
+1. **Entity identification** — Each entity type is identified by a `match` function that recognizes it by its shape (its fields), plus an `id` function that extracts a unique ID.
+2. **Normalize** — When query data arrives, the normalizer walks the data recursively, finds every object that matches an entity definition, stores it in a central **EntityStore**, and replaces it in the query data with a lightweight reference (`{ __ref: "type:id" }`).
 3. **Denormalize** — When a subscriber reads query data, references are resolved back into full entity objects from the EntityStore. If an entity has been updated anywhere, every query that contains it sees the new value.
 
 ```ts
@@ -41,22 +41,25 @@ The normalization system has three parts:
 {
   id: 1,
   name: "Alice",
-  __type: "User"
+  email: "alice@example.com"
 }
+
+// The "user" entity config matches this object because it has an "email" field
+// match: (obj) => 'email' in obj
 
 // After normalize() — stored in cache
 {
-  __ref: "User:1"
+  __ref: "user:1"
 }
 
 // Entity stored in EntityStore
-EntityStore["User:1"] = { id: 1, name: "Alice", __type: "User" }
+EntityStore["user:1"] = { id: 1, name: "Alice", email: "alice@example.com" }
 
 // After denormalize() — returned to subscribers
 {
   id: 1,
   name: "Alice",
-  __type: "User"
+  email: "alice@example.com"
 }
 ```
 
@@ -64,48 +67,36 @@ EntityStore["User:1"] = { id: 1, name: "Alice", __type: "User" }
 
 ## Setting up entity normalization
 
-### 1. Add `__type` to your data
+### Configure entities
 
-Entities need a `__type` field so the normalizer can identify them. You can add this on the server or transform responses on the client:
+Tell safe-query how to identify and extract IDs from your entities using the `entities` option on the client. Each entity type needs two functions:
 
-```ts
-type User = {
-  id: number
-  name: string
-  email: string
-  __type: 'User'
-}
-
-type Post = {
-  id: number
-  title: string
-  body: string
-  author: User
-  __type: 'Post'
-}
-```
-
-### 2. Configure `mapToEntities`
-
-Tell safe-query how to extract IDs from your entities using the `mapToEntities` option:
+- **`match`** — receives a plain object and returns `true` if that object is an instance of this entity type. You identify entities by their shape (which fields they have).
+- **`id`** — receives the matched object and returns a **string ID** that uniquely identifies the entity within its type.
 
 ```ts
 const api = safeQuery<AppError>({
   safe,
   staleTime: 30_000,
-  mapToEntities: {
-    User: (user) => String(user.id),
-    Post: (post) => String(post.id),
-    Comment: (comment) => String(comment.id),
+  entities: {
+    user: { match: (obj) => 'email' in obj, id: (u) => String(u.id) },
+    post: { match: (obj) => 'title' in obj, id: (p) => String(p.id) },
+    comment: { match: (obj) => 'body' in obj && !('title' in obj), id: (c) => String(c.id) },
   },
 })
 ```
 
-Each key in `mapToEntities` corresponds to a `__type` value. The function receives the entity object and must return a **string ID**. This ID, combined with the type, creates the unique key used in the EntityStore (e.g., `"User:1"`, `"Post:42"`).
+Each key in `entities` is the entity type name. The `id` function's return value, combined with the type name, creates the unique key used in the EntityStore (e.g., `"user:1"`, `"post:42"`).
 
 {% callout type="warning" %}
-The extractor must return a **string**. If your IDs are numbers, convert them with `String(id)`. The ID must be stable and unique within its type.
+The `id` function must return a **string**. If your IDs are numbers, convert them with `String(id)`. The ID must be stable and unique within its type.
 {% /callout %}
+
+{% callout type="note" %}
+The `match` functions are evaluated in order. Make your match predicates specific enough to avoid false positives. In the example above, `comment` checks for `'body' in obj && !('title' in obj)` to avoid matching `post` objects that also have a `body` field.
+{% /callout %}
+
+Once `entities` is configured on the client, **all queries and mutations automatically participate in normalization**. You do not need any entity-related config on individual queries or mutations.
 
 ---
 
@@ -113,28 +104,26 @@ The extractor must return a **string**. If your IDs are numbers, convert them wi
 
 ### Normalize
 
-When a query's fetch function returns data, the normalizer walks the entire response:
+When a query's fetch function returns data, the normalizer walks the entire response and uses the `match` functions to identify entities:
 
 ```ts
 // API returns this data for GET /posts/1
 const apiResponse = {
   id: 1,
   title: "Hello World",
-  __type: "Post",
   author: {
     id: 42,
     name: "Alice",
-    __type: "User",
+    email: "alice@example.com",
   },
   comments: [
     {
       id: 100,
       body: "Great post!",
-      __type: "Comment",
       author: {
         id: 43,
         name: "Bob",
-        __type: "User",
+        email: "bob@example.com",
       },
     },
   ],
@@ -143,25 +132,25 @@ const apiResponse = {
 
 The normalizer processes this recursively:
 
-1. Finds the `Comment` author (Bob) — stores `User:43` in EntityStore, replaces with `{ __ref: "User:43" }`.
-2. Finds the `Comment` — stores `Comment:100` in EntityStore (with Bob replaced by a ref), replaces with `{ __ref: "Comment:100" }`.
-3. Finds the `Post` author (Alice) — stores `User:42` in EntityStore, replaces with `{ __ref: "User:42" }`.
-4. Finds the `Post` itself — stores `Post:1` in EntityStore, replaces with `{ __ref: "Post:1" }`.
+1. Finds the `comment` author (Bob) — `match` identifies it as a `user`, stores `user:43` in EntityStore, replaces with `{ __ref: "user:43" }`.
+2. Finds the `comment` — `match` identifies it, stores `comment:100` in EntityStore (with Bob replaced by a ref), replaces with `{ __ref: "comment:100" }`.
+3. Finds the `post` author (Alice) — `match` identifies it as a `user`, stores `user:42` in EntityStore, replaces with `{ __ref: "user:42" }`.
+4. Finds the `post` itself — `match` identifies it, stores `post:1` in EntityStore, replaces with `{ __ref: "post:1" }`.
 
 The normalized data stored in the cache is just:
 
 ```ts
-{ __ref: "Post:1" }
+{ __ref: "post:1" }
 ```
 
 And the EntityStore now contains:
 
 ```ts
 {
-  "User:42":    { id: 42, name: "Alice", __type: "User" },
-  "User:43":    { id: 43, name: "Bob", __type: "User" },
-  "Comment:100": { id: 100, body: "Great post!", __type: "Comment", author: { __ref: "User:43" } },
-  "Post:1":     { id: 1, title: "Hello World", __type: "Post", author: { __ref: "User:42" }, comments: [{ __ref: "Comment:100" }] },
+  "user:42":     { id: 42, name: "Alice", email: "alice@example.com" },
+  "user:43":     { id: 43, name: "Bob", email: "bob@example.com" },
+  "comment:100": { id: 100, body: "Great post!", author: { __ref: "user:43" } },
+  "post:1":      { id: 1, title: "Hello World", author: { __ref: "user:42" }, comments: [{ __ref: "comment:100" }] },
 }
 ```
 
@@ -177,7 +166,7 @@ The `EntityRef` is the marker object that replaces entities in normalized data:
 
 ```ts
 type EntityRef = {
-  __ref: string // Format: "Type:id" — e.g., "User:42", "Post:1"
+  __ref: string // Format: "type:id" — e.g., "user:42", "post:1"
 }
 ```
 
@@ -192,8 +181,8 @@ The EntityStore maintains a **reverse index**: a mapping from each entity to the
 ```ts
 // When GET /posts returns posts by Alice and Bob:
 // reverse index tracks:
-//   "User:42" -> ["/posts", "/posts?author=alice"]
-//   "User:43" -> ["/posts", "/users/43"]
+//   "user:42" -> ["/posts", "/posts?author=alice"]
+//   "user:43" -> ["/posts", "/users/43"]
 ```
 
 When an entity is updated (via a mutation or by any query refetching), the reverse index tells safe-query **exactly which queries need to be notified**. Those queries are denormalized again with the updated entity, and their subscribers receive the new data.
@@ -207,7 +196,21 @@ This is registered automatically via `registerQueryEntities()` — every time a 
 Here is the core value proposition. Watch how a single mutation updates data across multiple queries:
 
 ```ts
-// Define queries
+// Types — no special fields needed, just plain data
+type User = {
+  id: number
+  name: string
+  email: string
+}
+
+type Post = {
+  id: number
+  title: string
+  body: string
+  author: User
+}
+
+// Define queries — no entity config needed on individual queries
 const getUsers = api.query({
   key: '/users',
   fn: () => fetchJson<User[]>(buildUrl(BASE_URL, '/users')),
@@ -265,10 +268,10 @@ await updateUser({
 })
 ```
 
-When the mutation response comes back with the updated user (`{ id: 42, name: "Alicia", __type: "User" }`):
+When the mutation response comes back with the updated user (`{ id: 42, name: "Alicia", email: "alice@example.com" }`):
 
-1. The response is normalized — `User:42` in the EntityStore is updated to `{ name: "Alicia" }`.
-2. The reverse index shows `User:42` appears in three queries: `/users`, `/users?id=42`, and `/users/42/posts`.
+1. The response is normalized — the `match` function identifies it as a `user`, and `user:42` in the EntityStore is updated to `{ name: "Alicia" }`.
+2. The reverse index shows `user:42` appears in three queries: `/users`, `/users?id=42`, and `/users/42/posts`.
 3. All three queries are denormalized again with the updated entity.
 4. All three subscribers fire with the new data — **Alice is now "Alicia" everywhere**.
 
@@ -285,7 +288,6 @@ type Comment = {
   id: number
   body: string
   author: User
-  __type: 'Comment'
 }
 
 type Post = {
@@ -293,37 +295,33 @@ type Post = {
   title: string
   author: User
   comments: Comment[]
-  __type: 'Post'
 }
 ```
 
-When a post is fetched, the normalizer extracts **every** entity at every level:
+When a post is fetched, the normalizer uses the `match` functions to extract **every** entity at every level:
 
 ```ts
 // API response for GET /posts/1
 {
   id: 1,
   title: "Understanding Normalization",
-  __type: "Post",
-  author: { id: 42, name: "Alice", __type: "User" },
+  author: { id: 42, name: "Alice", email: "alice@example.com" },
   comments: [
     {
       id: 200,
       body: "Great explanation!",
-      __type: "Comment",
-      author: { id: 43, name: "Bob", __type: "User" },
+      author: { id: 43, name: "Bob", email: "bob@example.com" },
     },
     {
       id: 201,
       body: "Thanks for writing this.",
-      __type: "Comment",
-      author: { id: 42, name: "Alice", __type: "User" },
+      author: { id: 42, name: "Alice", email: "alice@example.com" },
     },
   ],
 }
 ```
 
-After normalization, the EntityStore contains `User:42`, `User:43`, `Comment:200`, `Comment:201`, and `Post:1`. Notice that Alice appears twice (as post author and as comment author) but is stored only once in the EntityStore as `User:42`. If Alice's name changes, both appearances update simultaneously.
+After normalization, the EntityStore contains `user:42`, `user:43`, `comment:200`, `comment:201`, and `post:1`. Notice that Alice appears twice (as post author and as comment author) but is stored only once in the EntityStore as `user:42`. If Alice's name changes, both appearances update simultaneously.
 
 ---
 
@@ -334,16 +332,16 @@ The normalizer handles arrays seamlessly. A list query returning an array of ent
 ```ts
 // GET /users returns:
 [
-  { id: 1, name: "Alice", __type: "User" },
-  { id: 2, name: "Bob", __type: "User" },
-  { id: 3, name: "Carol", __type: "User" },
+  { id: 1, name: "Alice", email: "alice@example.com" },
+  { id: 2, name: "Bob", email: "bob@example.com" },
+  { id: 3, name: "Carol", email: "carol@example.com" },
 ]
 
 // Normalized cache entry becomes:
 [
-  { __ref: "User:1" },
-  { __ref: "User:2" },
-  { __ref: "User:3" },
+  { __ref: "user:1" },
+  { __ref: "user:2" },
+  { __ref: "user:3" },
 ]
 ```
 
@@ -358,20 +356,20 @@ The normalizer handles circular references safely. If entity A references entity
 {
   id: 1,
   name: "Alice",
-  __type: "User",
+  email: "alice@example.com",
   manager: {
     id: 2,
     name: "Bob",
-    __type: "User",
+    email: "bob@example.com",
     directReports: [
-      { id: 1, name: "Alice", __type: "User", manager: ... } // circular!
+      { id: 1, name: "Alice", email: "alice@example.com", manager: ... } // circular!
     ]
   }
 }
 
 // After normalization — no circularity, just refs
-// User:1 -> { id: 1, name: "Alice", __type: "User", manager: { __ref: "User:2" } }
-// User:2 -> { id: 2, name: "Bob", __type: "User", directReports: [{ __ref: "User:1" }] }
+// user:1 -> { id: 1, name: "Alice", email: "alice@example.com", manager: { __ref: "user:2" } }
+// user:2 -> { id: 2, name: "Bob", email: "bob@example.com", directReports: [{ __ref: "user:1" }] }
 ```
 
 ---
@@ -387,12 +385,51 @@ const getUser = api.query({
   initialData: (ctx) => {
     // Pull the user from the entity store — it may have been cached
     // by the /users list query
-    return ctx.getEntity('User', ctx.params?.id)
+    return ctx.getEntity('user', ctx.params?.id)
   },
 })
 ```
 
 The `getEntity(type, id)` function is available on the `DataFnContext` object passed to `initialData` and `placeholderData` functions. It returns the entity if it exists in the store, or `undefined` if it doesn't.
+
+{% callout type="note" %}
+The first argument to `getEntity` is the entity type name — the key you used in the `entities` config (e.g., `'user'`, `'post'`), not a class name or constructor.
+{% /callout %}
+
+---
+
+## The normalize escape hatch
+
+By default, the normalizer performs a recursive tree walk over your query data, using the `match` functions to find entities. For most cases this works perfectly. However, some API responses have complex shapes where the tree walk may be inefficient or where you want explicit control over which entities are extracted.
+
+The per-query `normalize` option lets you skip the tree walk and tell safe-query exactly which entities to extract:
+
+```ts
+type Feed = {
+  posts: Post[]
+  trending: Post[]
+  suggestedUsers: User[]
+}
+
+const getFeed = api.query({
+  key: '/feed',
+  fn: () => fetchJson<Feed>(buildUrl(BASE_URL, '/feed')),
+  normalize: (data) => ({
+    post: [...data.posts, ...data.trending],
+    user: [
+      ...data.suggestedUsers,
+      ...data.posts.map((p) => p.author),
+      ...data.trending.map((p) => p.author),
+    ],
+  }),
+})
+```
+
+The `normalize` function receives the raw response data and returns an object where each key is an entity type name (matching a key in your `entities` config) and each value is an array of entity objects to extract. The `id` function from the entity config is still used to determine each entity's unique ID.
+
+{% callout type="warning" %}
+When you provide a `normalize` function, the automatic tree walk is skipped entirely for that query. You are responsible for returning **all** entities you want tracked. Any entities you omit will not be stored in the EntityStore for that query.
+{% /callout %}
 
 ---
 
@@ -410,7 +447,6 @@ type User = {
   id: number
   name: string
   email: string
-  __type: 'User'
 }
 
 const safe = createSafe<AppError>({
@@ -424,14 +460,14 @@ const safe = createSafe<AppError>({
 const api = safeQuery<AppError>({
   safe,
   staleTime: 60_000,
-  mapToEntities: {
-    User: (user) => String(user.id),
+  entities: {
+    user: { match: (obj) => 'email' in obj, id: (u) => String(u.id) },
   },
 })
 
 const BASE_URL = 'https://api.example.com'
 
-// List query
+// List query — no entity config needed
 const getUsers = api.query({
   key: '/users',
   fn: () => fetchJson<User[]>(buildUrl(BASE_URL, '/users')),
@@ -441,10 +477,10 @@ const getUsers = api.query({
 const getUser = api.query({
   key: '/users/:id',
   fn: (ctx) => fetchJson<User>(buildUrl(BASE_URL, '/users/:id', ctx.params)),
-  initialData: (ctx) => ctx.getEntity('User', ctx.params?.id),
+  initialData: (ctx) => ctx.getEntity('user', ctx.params?.id),
 })
 
-// Mutation
+// Mutation — no entity config needed
 const updateUser = api.mutate<User, Partial<User>>({
   key: '/users/:id',
   method: 'PATCH',
@@ -480,7 +516,7 @@ await updateUser({
 Here is exactly what happens when a mutation returns an entity, step by step:
 
 1. The mutation's `fn` returns a `Result` with the updated entity.
-2. The response data is **normalized** — the normalizer walks the response, finds entities with `__type`, and updates them in the EntityStore.
+2. The response data is **normalized** — the normalizer walks the response, uses `match` functions to find entities, and updates them in the EntityStore.
 3. For each updated entity, the reverse index is consulted to find **every query** that contains that entity.
 4. Each affected query's normalized data is **denormalized** using the updated EntityStore, producing new data.
 5. Each affected query's subscribers are **notified** with the new state.

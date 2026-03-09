@@ -43,10 +43,24 @@ describe('buildUrl', () => {
     )
   })
 
-  it('handles no params argument', () => {
-    expect(buildUrl('https://api.example.com', '/users/:id')).toBe(
-      'https://api.example.com/users/:id'
+  it('throws when path has unreplaced params', () => {
+    expect(() => buildUrl('https://api.example.com', '/users/:id')).toThrow(
+      'Missing URL params: id'
     )
+  })
+
+  it('throws when params object is missing required params', () => {
+    expect(() => buildUrl('https://api.example.com', '/users/:id', {})).toThrow(
+      'Missing URL params: id'
+    )
+  })
+
+  it('throws when some path params are missing', () => {
+    expect(() =>
+      buildUrl('https://api.example.com', '/users/:userId/posts/:postId', {
+        userId: '1',
+      })
+    ).toThrow('Missing URL params: postId')
   })
 
   describe('search params', () => {

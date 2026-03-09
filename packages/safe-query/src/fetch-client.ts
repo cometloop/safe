@@ -3,11 +3,14 @@ import { HttpError, type FetchOptions } from './types'
 export async function fetchJson<T>(
   url: string,
   options?: FetchOptions
-): Promise<T> {
+): Promise<T | undefined> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     Accept: 'application/json',
     ...options?.headers,
+  }
+
+  if (options?.body !== undefined) {
+    headers['Content-Type'] = 'application/json'
   }
 
   const init: RequestInit = {
@@ -40,7 +43,7 @@ export async function fetchJson<T>(
     response.status === 204 ||
     response.headers.get('content-length') === '0'
   ) {
-    return undefined as T
+    return undefined
   }
 
   return response.json() as Promise<T>

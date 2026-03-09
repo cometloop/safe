@@ -30,7 +30,6 @@ describe('fetchJson', () => {
     expect(fetch).toHaveBeenCalledWith('https://api.example.com/users', {
       method: 'GET',
       headers: {
-        'Content-Type': 'application/json',
         Accept: 'application/json',
       },
       signal: undefined,
@@ -177,7 +176,6 @@ describe('fetchJson', () => {
       'https://api.example.com/users',
       expect.objectContaining({
         headers: {
-          'Content-Type': 'application/json',
           Accept: 'application/json',
           Authorization: 'Bearer token123',
         },

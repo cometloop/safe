@@ -30,6 +30,10 @@ const api = safeQuery<AppError>({
   safe,
   staleTime: 30_000,
   gcTime: 5 * 60_000,
+  entities: {
+    user: { match: (obj) => 'email' in obj, id: (u) => u.id },
+    post: { match: (obj) => 'title' in obj, id: (p) => p.id },
+  },
 })
 ```
 
@@ -238,11 +242,10 @@ const getUser = api.query({
 The function form receives a context with `getEntity` (to pull from the entity store) and route `params`/`searchParams`. This enables the list-to-detail pattern — seed a detail query from a previously fetched list:
 
 ```typescript
-// 1. List query normalizes users into the entity store
+// 1. List query normalizes users into the entity store (via global entity config)
 const getUsers = api.query({
   key: '/users',
   fn: () => fetchJson<User[]>('/api/users'),
-  entities: { user: (u) => u.id },
 })
 await getUsers() // populates entity store
 
@@ -306,6 +309,51 @@ This lets UI components render data immediately while showing a subtle loading i
 
 Once the fetch completes, subscribers receive the real data with `isPlaceholderData: false`.
 
+### `keepPreviousData` for Pagination
+
+When changing parameters (e.g., page 1 to page 2), the new cache key has no data and the status drops to `loading`. Use `keepPreviousData` to hold the previous result as placeholder during transitions:
+
+```typescript
+import { keepPreviousData } from '@cometloop/safe-query'
+
+const getUsers = api.query({
+  key: '/users',
+  fn: ({ searchParams }) => fetchJson<User[]>(`/api/users?page=${searchParams?.page}`),
+  placeholderData: keepPreviousData,
+})
+
+// Page 1 loads normally
+await getUsers({ searchParams: { page: 1 } })
+
+// Page 2 — page 1 data stays visible as placeholder while page 2 loads
+const [page2, err] = await getUsers({ searchParams: { page: 2 } })
+```
+
+Subscribers see the transition smoothly:
+
+```typescript
+getUsers.subscribe((state) => {
+  state.data             // page 1 data (placeholder) → page 2 data (real)
+  state.isPlaceholderData // true → false
+  state.isFetching       // true → false
+}, { searchParams: { page: 2 } })
+```
+
+The `placeholderData` function form receives `previousData` in the context — the last successfully fetched data from any invocation of that query:
+
+```typescript
+const getUsers = api.query({
+  key: '/users',
+  fn: ({ searchParams }) => fetchJson<User[]>(`/api/users?page=${searchParams?.page}`),
+  placeholderData: (ctx) => {
+    // ctx.previousData is the last successful result (e.g., page 1 data)
+    return ctx.previousData
+  },
+})
+```
+
+`keepPreviousData` is simply a shorthand for `(ctx) => ctx.previousData`.
+
 ### `initialData` vs `placeholderData`
 
 | | `initialData` | `placeholderData` |
@@ -314,7 +362,7 @@ Once the fetch completes, subscribers receive the real data with `isPlaceholderD
 | Populates entity store | Yes (if `entities` configured) | No |
 | Subject to `staleTime` | Yes | No |
 | `isPlaceholderData` | `false` | `true` |
-| Use case | SSR hydration, list-to-detail with confidence | Preview while fetching |
+| Use case | SSR hydration, list-to-detail with confidence | Preview while fetching, pagination |
 
 Use `initialData` when you're confident the data is correct and recent enough. Use `placeholderData` when you want to show *something* while the real fetch happens.
 
@@ -356,6 +404,56 @@ const [user, err] = await createUser({
 })
 ```
 
+## Imperative Cache Access
+
+Read and write cache data directly with `getQueryData` and `setQueryData`. Useful for WebSocket/SSE push updates, prefetching on hover, sharing data between unrelated queries, and testing.
+
+### `getQueryData`
+
+Read cached data for a query key. Returns `undefined` if no data is cached. Handles entity denormalization automatically.
+
+```typescript
+// Simple key
+const users = api.getQueryData<User[]>('/users')
+
+// With path params
+const user = api.getQueryData<User>('/users/:id', { params: { id: '123' } })
+
+// With search params
+const page2 = api.getQueryData<User[]>('/users', { searchParams: { page: 2 } })
+```
+
+### `setQueryData`
+
+Write data to the cache for a query key. Accepts a value or an updater function. Normalizes entities automatically when `entities` is configured. Subscribers are notified immediately.
+
+```typescript
+// Set data directly
+api.setQueryData('/users', [{ id: '1', name: 'Alice' }])
+
+// Updater function — receives current cached data (or undefined)
+api.setQueryData<User[]>('/users', (old) =>
+  old ? [...old, { id: '2', name: 'Bob' }] : [{ id: '2', name: 'Bob' }]
+)
+
+// With path params
+api.setQueryData('/users/:id', { id: '1', name: 'Updated' }, { params: { id: '1' } })
+
+// WebSocket push update
+ws.on('user:updated', (user) => {
+  api.setQueryData('/users/:id', user, { params: { id: user.id } })
+})
+
+// Prefetch on hover
+function onHover(userId: string) {
+  if (!api.getQueryData('/users/:id', { params: { id: userId } })) {
+    fetch(`/api/users/${userId}`).then(r => r.json()).then(user => {
+      api.setQueryData('/users/:id', user, { params: { id: userId } })
+    })
+  }
+}
+```
+
 ## Cache Invalidation
 
 Invalidate queries by exact key, by prefix, or all at once. Subscribers are notified immediately.
@@ -387,35 +485,50 @@ api.destroy()
 
 ## Entity Normalization
 
-Entities with a `__type` field are normalized into a shared store. When a mutation updates an entity, all queries containing it are notified automatically.
+Entities are identified via `match` functions defined globally on the client. When query data arrives, the library walks the response tree and matches objects automatically — no per-query entity config needed.
 
 ```typescript
-// If your API returns __type natively
+const api = safeQuery<AppError>({
+  safe,
+  entities: {
+    user: { match: (obj) => 'email' in obj, id: (u) => u.id },
+    post: { match: (obj) => 'title' in obj, id: (p) => p.id },
+  },
+})
+
+// Queries just work — global matchers identify entities automatically
 const getUsers = api.query({
   key: '/users',
-  fn: (): Promise<User[]> => fetch('/api/users').then(r => r.json()),
-  entities: { user: (u) => u.id },
+  fn: () => fetchJson<User[]>('/api/users'),
+})
+
+// When a mutation updates an entity, all queries containing it are notified automatically
+const getPost = api.query({
+  key: '/posts/:id',
+  fn: ({ params }) => fetchJson<Post>(`/api/posts/${params.id}`),
+})
+```
+
+### Per-Query `normalize` Escape Hatch
+
+For responses with complex structures where tree walking is unnecessary overhead, use `normalize` to explicitly extract entities. This skips the automatic tree walk and tells the store exactly what to index.
+
+```typescript
+type Feed = { posts: Array<Post & { author: User }> }
+
+const getFeed = api.query({
+  key: '/feed',
+  fn: () => fetchJson<Feed>('/api/feed'),
+  normalize: (data) => ({
+    post: data.posts,
+    user: data.posts.map(p => p.author),
+  }),
 })
 ```
 
 ### `mapToEntities`
 
-Use `mapToEntities` to add `__type` tags before normalization. This keeps `parseResponse` for shaping data and `mapToEntities` for entity concerns:
-
-```typescript
-type ApiUser = { type: string; id: string; name: string }
-type NormalizedUser = ApiUser & { __type: 'user' }
-
-const getUsers = api.query({
-  key: '/users',
-  fn: (): Promise<ApiUser[]> => fetch('/api/users').then(r => r.json()),
-  mapToEntities: (users): NormalizedUser[] =>
-    users.map(u => ({ ...u, __type: 'user' as const })),
-  entities: { user: (u: NormalizedUser) => u.id },
-})
-```
-
-`mapToEntities` composes with `parseResponse` — the data flows through `parseResponse` first, then `mapToEntities`:
+Use `mapToEntities` for genuine data transformations before normalization — such as flattening nested structures or adding computed fields. It composes with `parseResponse` (data flows through `parseResponse` first, then `mapToEntities`).
 
 ```typescript
 type RawResponse = { data: ApiPost[] }
@@ -426,32 +539,13 @@ const getPosts = api.query({
   fn: () => fetch('/api/posts').then(r => r.json()),
   // Step 1: unwrap the response envelope
   parseResponse: (raw: RawResponse) => raw.data,
-  // Step 2: tag entities for normalization
+  // Step 2: flatten nested authors to top-level for normalization
   mapToEntities: (posts) =>
     posts.map(post => ({
       ...post,
-      __type: 'post' as const,
-      author: { ...post.author, __type: 'user' as const },
+      authorId: post.author.id,
+      authorName: post.author.name,
     })),
-  entities: {
-    post: (p) => p.id,
-    user: (u) => u.id,
-  },
-})
-```
-
-The same option works on mutations:
-
-```typescript
-const createUser = api.mutate<ApiUser, CreateUserInput>({
-  key: '/users',
-  fn: ({ body }) => fetch('/api/users', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  }).then(r => r.json()),
-  method: 'POST',
-  mapToEntities: (user): NormalizedUser => ({ ...user, __type: 'user' as const }),
-  entities: { user: (u: NormalizedUser) => u.id },
 })
 ```
 
@@ -472,7 +566,6 @@ const updateUser = api.mutate<User, UpdateUserInput, '/users/:id'>({
     body: JSON.stringify(body),
   }).then(r => r.json()),
   method: 'PUT',
-  entities: { user: (u) => u.id },
 })
 
 // Subscribers see optimistic state immediately, then server-confirmed state.
@@ -480,7 +573,7 @@ const updateUser = api.mutate<User, UpdateUserInput, '/users/:id'>({
 await updateUser({ params: { id: '123' }, body: { name: 'New Name' } })
 ```
 
-For mutations with multiple entity types, specify which to update optimistically:
+For mutations with multiple entity types in the global config, specify which to update optimistically:
 
 ```typescript
 const updatePost = api.mutate({
@@ -490,7 +583,6 @@ const updatePost = api.mutate({
     body: JSON.stringify(body),
   }).then(r => r.json()),
   method: 'PUT',
-  entities: { post: (p) => p.id, user: (u) => u.id },
   optimistic: {
     entityType: 'post',
     entityId: (params) => params.postId,
@@ -572,6 +664,7 @@ Fresh queries (within their `staleTime`) are not refetched on focus — only sta
 |--------|---------|-------------|
 | `staleTime` | `0` | Ms before cached data is considered stale |
 | `gcTime` | `300000` | Ms before unused cache entries are garbage collected |
+| `entities` | `undefined` | Global entity config for normalized caching |
 | `enableOptimisticUpdates` | `false` | Enable optimistic mutations |
 | `refetchInterval` | `false` | Ms between automatic refetches, `false` to disable |
 | `refetchIntervalInBackground` | `false` | Continue interval refetching when the tab is hidden |
@@ -624,6 +717,8 @@ const getNotifications = api.query({
 |--------|-------------|
 | `query(config)` | Create a query callable |
 | `mutate(config)` | Create a mutation callable |
+| `getQueryData(path, options?)` | Read cached data for a query key |
+| `setQueryData(path, updater, options?)` | Write data to the cache for a query key |
 | `invalidateByPrefix(prefix)` | Invalidate all queries whose key starts with `prefix` |
 | `invalidateAll()` | Invalidate every cached query |
 | `clear()` | Soft reset — clears cache and entity store |

@@ -16,6 +16,13 @@ export function buildUrl(
     }
   }
 
+  // Validate all path params were replaced
+  const unreplaced = resolvedPath.match(/:([a-zA-Z_]\w*)/g)
+  if (unreplaced) {
+    const names = unreplaced.map(p => p.substring(1)).join(', ')
+    throw new Error(`Missing URL params: ${names}`)
+  }
+
   const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
   const p = resolvedPath.startsWith('/') ? resolvedPath : `/${resolvedPath}`
   let url = `${base}${p}`

@@ -1,5 +1,5 @@
 import type { SafeInstance, SafeResult } from '@cometloop/safe'
-import type { MutationConfig, MutationCallable, SearchParams, MutationFnContext, LifecycleCallbacks } from './types'
+import type { MutationConfig, MutationCallable, MutationState, SearchParams, MutationFnContext, MutationVariables, LifecycleCallbacks, GlobalEntityConfig } from './types'
 import { QueryCache } from './query-cache'
 import { EntityStore } from './entity-store'
 import { Notifier } from './notifier'
@@ -9,6 +9,7 @@ export type MutationDeps<E> = {
   queryCache: QueryCache
   entityStore: EntityStore
   notifier: Notifier
+  entities?: GlobalEntityConfig
   enableOptimisticUpdates: boolean
 }
 
@@ -39,9 +40,11 @@ export function createMutation<
   const method = config.method
   const parseResponse = config.parseResponse
   const mapToEntities = config.mapToEntities
-  const entities = config.entities
+  const entities = deps.entities
+  const normalize = config.normalize
   const retry = config.retry
   const optimisticConfig = config.optimistic
+  const configOnMutate = config.onMutate
   const configOnSuccess = config.onSuccess
   const configOnError = config.onError
   const configOnSettled = config.onSettled
@@ -52,6 +55,34 @@ export function createMutation<
   const combinedParse: ((data: TData) => TMapped) | undefined = mapToEntities
     ? (data: TData) => mapToEntities((parseResponse ? parseResponse(data) : data) as TParsed)
     : parseResponse as ((data: TData) => TMapped) | undefined
+
+  // ─── State tracking ───
+
+  let state: MutationState<TMapped, E> = {
+    status: 'idle',
+    isPending: false,
+    isSuccess: false,
+    isError: false,
+    data: undefined,
+    error: null,
+    submittedAt: null,
+  }
+  const subscribers = new Set<(s: MutationState<TMapped, E>) => void>()
+
+  function setState(updates: Partial<MutationState<TMapped, E>>) {
+    const status = updates.status ?? state.status
+    state = {
+      ...state,
+      ...updates,
+      status,
+      isPending: status === 'pending',
+      isSuccess: status === 'success',
+      isError: status === 'error',
+    }
+    for (const cb of subscribers) cb(state)
+  }
+
+  // ─── Optimistic resolution ───
 
   function resolveOptimistic(params?: Record<string, string>): {
     entityType: string
@@ -89,44 +120,64 @@ export function createMutation<
     return { entityType, entityId }
   }
 
-  function invoke(options: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; body?: unknown } & LifecycleCallbacks<TMapped, E>): Promise<SafeResult<TMapped, E>> {
+  // ─── Invoke ───
+
+  async function invoke(options: { params?: Record<string, string>; searchParams?: SearchParams; signal?: AbortSignal; body?: unknown } & LifecycleCallbacks<TMapped, E>): Promise<SafeResult<TMapped, E>> {
     const params = options?.params
     const body = options?.body
     const invokeOnSuccess = options?.onSuccess
     const invokeOnError = options?.onError
     const invokeOnSettled = options?.onSettled
-    const opt = resolveOptimistic(params)
 
-    // Optimistic update flow using per-entity tracking
+    setState({ status: 'pending', data: undefined, error: null, submittedAt: Date.now() })
+
+    let mutateContext: unknown
     let affectedQueryKeys: Set<string> | null = null
     let didOptimistic = false
+    let opt: { entityType: string; entityId: string } | null = null
 
-    if (opt && (method === 'PUT' || method === 'PATCH') && body !== undefined) {
-      const existing = entityStore.get(opt.entityType, opt.entityId)
-      if (existing) {
-        entityStore.beginOptimistic(opt.entityType, opt.entityId)
-        didOptimistic = true
-        const merged = { ...(existing as Record<string, unknown>), ...(body as Record<string, unknown>) }
-        entityStore.set(opt.entityType, opt.entityId, merged)
-        affectedQueryKeys = entityStore.getQueriesForEntity(
-          opt.entityType,
-          opt.entityId
-        )
-        notifier.notifyMany(affectedQueryKeys)
-      }
-    } else if (opt && method === 'DELETE') {
-      const existing = entityStore.get(opt.entityType, opt.entityId)
-      if (existing) {
-        entityStore.beginOptimistic(opt.entityType, opt.entityId)
-        didOptimistic = true
-        affectedQueryKeys = entityStore.getQueriesForEntity(
-          opt.entityType,
-          opt.entityId
-        )
-        entityStore.delete(opt.entityType, opt.entityId)
-        notifier.notifyMany(affectedQueryKeys)
+    if (configOnMutate) {
+      // Custom optimistic via onMutate — skip built-in optimistic updates
+      const variables: Record<string, unknown> = {}
+      if (params) variables.params = params
+      if (body !== undefined) variables.body = body
+      if (options?.searchParams) variables.searchParams = options.searchParams
+      mutateContext = await Promise.resolve(
+        configOnMutate(variables as MutationVariables<TPath, TBody>)
+      )
+    } else {
+      // Built-in optimistic update
+      opt = resolveOptimistic(params)
+
+      if (opt && (method === 'PUT' || method === 'PATCH') && body !== undefined) {
+        const existing = entityStore.get(opt.entityType, opt.entityId)
+        if (existing) {
+          entityStore.beginOptimistic(opt.entityType, opt.entityId)
+          didOptimistic = true
+          const merged = { ...(existing as Record<string, unknown>), ...(body as Record<string, unknown>) }
+          entityStore.set(opt.entityType, opt.entityId, merged)
+          affectedQueryKeys = entityStore.getQueriesForEntity(
+            opt.entityType,
+            opt.entityId
+          )
+          notifier.notifyMany(affectedQueryKeys)
+        }
+      } else if (opt && method === 'DELETE') {
+        const existing = entityStore.get(opt.entityType, opt.entityId)
+        if (existing) {
+          entityStore.beginOptimistic(opt.entityType, opt.entityId)
+          didOptimistic = true
+          affectedQueryKeys = entityStore.getQueriesForEntity(
+            opt.entityType,
+            opt.entityId
+          )
+          entityStore.delete(opt.entityType, opt.entityId)
+          notifier.notifyMany(affectedQueryKeys)
+        }
       }
     }
+
+    let signalCleanup: (() => void) | null = null
 
     return safeInstance.async<TData, TMapped>(
       (signal) => {
@@ -134,19 +185,27 @@ export function createMutation<
         if (signal || options?.signal) {
           // Compose both signals: if either aborts, the composed controller aborts
           const controller = new AbortController()
+          const cleanups: (() => void)[] = []
           if (signal) {
             if (signal.aborted) {
               controller.abort(signal.reason)
             } else {
-              signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+              const handler = () => controller.abort(signal.reason)
+              signal.addEventListener('abort', handler, { once: true })
+              cleanups.push(() => signal.removeEventListener('abort', handler))
             }
           }
           if (options?.signal) {
             if (options.signal.aborted) {
               controller.abort(options.signal.reason)
             } else {
-              options.signal.addEventListener('abort', () => controller.abort(options.signal!.reason), { once: true })
+              const handler = () => controller.abort(options.signal!.reason)
+              options.signal.addEventListener('abort', handler, { once: true })
+              cleanups.push(() => options.signal!.removeEventListener('abort', handler))
             }
+          }
+          if (cleanups.length > 0) {
+            signalCleanup = () => { for (const fn of cleanups) fn() }
           }
           context.signal = controller.signal
         }
@@ -156,18 +215,20 @@ export function createMutation<
         parseResult: combinedParse,
         retry,
         onSuccess: (result) => {
-          // End optimistic tracking as success
-          if (didOptimistic && opt) {
-            entityStore.endOptimistic(opt.entityType, opt.entityId, true)
-          }
+          setState({ status: 'success', data: result, error: null })
+
+          // Normalize server response BEFORE ending optimistic tracking,
+          // so endOptimistic can snapshot confirmed server state as new base
+          const queryKeys = new Set<string>()
 
           if (entities && result !== undefined) {
-            const { entityKeys } = entityStore.normalize(
-              result,
-              entities as Record<string, (entity: any) => string>
-            )
-            // Notify all queries that contain affected entities
-            const queryKeys = new Set<string>()
+            let entityKeys: Set<string>
+            if (normalize) {
+              const entityMap = normalize(result)
+              entityKeys = entityStore.normalizeExplicit(entityMap, entities)
+            } else {
+              ;({ entityKeys } = entityStore.normalize(result, entities))
+            }
             for (const eKey of entityKeys) {
               const idx = eKey.indexOf(':')
               const type = eKey.substring(0, idx)
@@ -176,18 +237,35 @@ export function createMutation<
                 queryKeys.add(qk)
               }
             }
-            if (affectedQueryKeys) {
-              for (const qk of affectedQueryKeys) {
+          }
+
+          // End optimistic tracking after store has confirmed server data
+          if (didOptimistic && opt) {
+            const keysToInvalidate = entityStore.endOptimistic(opt.entityType, opt.entityId, true)
+            if (keysToInvalidate) {
+              for (const qk of keysToInvalidate) {
+                queryCache.invalidate(qk)
                 queryKeys.add(qk)
               }
             }
+          }
+
+          if (affectedQueryKeys) {
+            for (const qk of affectedQueryKeys) {
+              queryKeys.add(qk)
+            }
+          }
+
+          if (queryKeys.size > 0) {
             notifier.notifyMany(queryKeys)
           }
 
-          configOnSuccess?.(result)
+          configOnSuccess?.(result, mutateContext)
           invokeOnSuccess?.(result)
         },
         onError: (error) => {
+          setState({ status: 'error', error: error as E })
+
           // Rollback optimistic update using per-entity tracking
           if (didOptimistic && opt) {
             const keysToInvalidate = entityStore.endOptimistic(opt.entityType, opt.entityId, false)
@@ -202,16 +280,48 @@ export function createMutation<
             }
           }
 
-          configOnError?.(error as E)
+          configOnError?.(error as E, mutateContext)
           invokeOnError?.(error as E)
         },
         onSettled: (result, error) => {
-          configOnSettled?.(result as TMapped | undefined, error as E | null)
+          if (signalCleanup) {
+            signalCleanup()
+            signalCleanup = null
+          }
+          configOnSettled?.(result as TMapped | undefined, error as E | null, mutateContext)
           invokeOnSettled?.(result as TMapped | undefined, error as E | null)
         },
       }
     )
   }
 
-  return invoke as MutationCallable<TMapped, E, TPath, TBody>
+  // ─── Build callable with state tracking ───
+
+  const callable = invoke as unknown as MutationCallable<TMapped, E, TPath, TBody>
+
+  Object.defineProperties(callable, {
+    status: { get: () => state.status, enumerable: true },
+    isPending: { get: () => state.isPending, enumerable: true },
+    isSuccess: { get: () => state.isSuccess, enumerable: true },
+    isError: { get: () => state.isError, enumerable: true },
+    data: { get: () => state.data, enumerable: true },
+    error: { get: () => state.error, enumerable: true },
+    submittedAt: { get: () => state.submittedAt, enumerable: true },
+  })
+
+  ;(callable as any).subscribe = (callback: (s: MutationState<TMapped, E>) => void) => {
+    subscribers.add(callback)
+    return () => { subscribers.delete(callback) }
+  }
+
+  ;(callable as any).reset = () => {
+    setState({
+      status: 'idle',
+      data: undefined,
+      error: null,
+      submittedAt: null,
+    })
+  }
+
+  return callable
 }

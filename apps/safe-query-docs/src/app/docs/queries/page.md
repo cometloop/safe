@@ -32,8 +32,8 @@ The `key` identifies this query in the cache. The `fn` function performs the act
 | `key` | `string` | **(required)** | Path string like `'/users'` or `'/users/:id'`. Path parameters (`:param`) are extracted at the type level. |
 | `fn` | `(context: QueryFnContext) => Promise<TData>` | **(required)** | The function that fetches data. Receives a context object with `signal`, `params`, and `searchParams`. |
 | `parseResponse` | `(data: TData) => TParsed` | — | Transform the raw response before caching. |
-| `mapToEntities` | `(data: TParsed) => TMapped` | — | Add `__type` fields for entity normalization. Required when `TMapped` differs from `TParsed`. |
-| `entities` | `{ [typeName]: (entity) => string }` | — | Entity extractors for normalization. Maps type names to functions that return entity IDs. |
+| `mapToEntities` | `(data: TParsed) => TMapped` | — | Transform parsed data before caching and normalization. |
+| `normalize` | `(data: TMapped) => Record<string, unknown \| unknown[]>` | — | Explicit entity extraction that skips the automatic tree walk. See [Entity normalization](/docs/entity-normalization). |
 | `staleTime` | `number` | Client default | Override the client-level `staleTime` for this query. |
 | `gcTime` | `number` | Client default | Override the client-level `gcTime` for this query. |
 | `retry` | `RetryConfig` | — | Retry configuration from `@cometloop/safe`. Controls automatic retries on failure. |
@@ -42,7 +42,7 @@ The `key` identifies this query in the cache. The `fn` function performs the act
 | `refetchOnWindowFocus` | `boolean` | Client default | Override the client-level `refetchOnWindowFocus`. |
 | `initialData` | `TMapped \| (ctx) => TMapped \| undefined` | — | Synchronous data to populate the cache before the first fetch. See [Initial data](/docs/initial-data). |
 | `initialDataUpdatedAt` | `number \| () => number \| undefined` | — | Timestamp for when `initialData` was last updated. Used to determine if initial data is stale. |
-| `placeholderData` | `TMapped \| (ctx) => TMapped \| undefined` | — | Data to show while the first fetch is in progress. Not persisted to the cache. See [Placeholder data](/docs/placeholder-data). |
+| `placeholderData` | `TMapped \| (ctx) => TMapped \| undefined` | — | Data to show while the first fetch is in progress. Not persisted to the cache. The function form receives `previousData` (last successful result) in its context. Use `keepPreviousData` for pagination. See [Placeholder data](/docs/placeholder-data). |
 | `onSuccess` | `(data: TMapped) => void` | — | Called when the query successfully fetches data. |
 | `onError` | `(error: E) => void` | — | Called when the query fails. |
 | `onSettled` | `(data: TMapped \| undefined, error: E \| null) => void` | — | Called when the query completes, regardless of success or failure. |
@@ -397,7 +397,7 @@ const getUsers = api.query({
 const [users, error] = await getUsers()
 ```
 
-For entity normalization, use `mapToEntities` to add `__type` fields. See [Entity normalization](/docs/entity-normalization) for details.
+For entity normalization, configure `entities` globally on the client. See [Entity normalization](/docs/entity-normalization) for details.
 
 ---
 

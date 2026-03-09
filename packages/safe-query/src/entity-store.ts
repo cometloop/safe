@@ -1,4 +1,4 @@
-import type { EntityRef } from './types'
+import type { EntityRef, GlobalEntityConfig } from './types'
 
 export type EntitySnapshot = Map<string, Map<string, unknown>>
 
@@ -11,6 +11,12 @@ export class EntityStore {
     inFlightCount: number
     hadError: boolean
   }>()
+  private _version = 0
+  private denormWeakCache = new WeakMap<object, { version: number; result: unknown }>()
+
+  get version(): number {
+    return this._version
+  }
 
   private entityKey(type: string, id: string): string {
     return `${type}:${id}`
@@ -32,6 +38,7 @@ export class EntityStore {
       this.entities.set(type, typeMap)
     }
     typeMap.set(id, entity)
+    this._version++
   }
 
   delete(type: string, id: string): void {
@@ -41,6 +48,7 @@ export class EntityStore {
       if (typeMap.size === 0) {
         this.entities.delete(type)
       }
+      this._version++
     }
   }
 
@@ -87,9 +95,10 @@ export class EntityStore {
 
   normalize(
     data: unknown,
-    extractors: Record<string, (entity: any) => string>
+    extractors: GlobalEntityConfig
   ): { normalized: unknown; entityKeys: Set<string> } {
     const entityKeys = new Set<string>()
+    const extractorEntries = Object.entries(extractors)
 
     const walk = (value: unknown): unknown => {
       if (value === null || value === undefined) return value
@@ -100,12 +109,21 @@ export class EntityStore {
       }
 
       const obj = value as Record<string, unknown>
-      const typeName = obj.__type as string | undefined
-      const extractor = typeName ? extractors[typeName] : undefined
 
-      if (typeName && extractor) {
-        const id = extractor(obj)
-        const eKey = this.entityKey(typeName, id)
+      // Match-based resolution: find the first extractor whose match() returns true
+      let matchedType: string | undefined
+      let matchedExtractor: GlobalEntityConfig[string] | undefined
+      for (const [typeName, extractor] of extractorEntries) {
+        if (extractor.match(obj)) {
+          matchedType = typeName
+          matchedExtractor = extractor
+          break
+        }
+      }
+
+      if (matchedType && matchedExtractor) {
+        const id = matchedExtractor.id(obj)
+        const eKey = this.entityKey(matchedType, id)
         entityKeys.add(eKey)
 
         // Walk nested properties to normalize nested entities first
@@ -115,7 +133,7 @@ export class EntityStore {
         }
 
         // Store the walked entity (with nested refs) in the entity store
-        this.set(typeName, id, walked)
+        this.set(matchedType, id, walked)
 
         return { __ref: eKey } as EntityRef
       }
@@ -130,6 +148,25 @@ export class EntityStore {
 
     const normalized = walk(data)
     return { normalized, entityKeys }
+  }
+
+  normalizeExplicit(
+    entityMap: Record<string, unknown | unknown[]>,
+    extractors: GlobalEntityConfig
+  ): Set<string> {
+    const entityKeys = new Set<string>()
+    for (const [typeName, entities] of Object.entries(entityMap)) {
+      const extractor = extractors[typeName]
+      if (!extractor) continue
+      const items = Array.isArray(entities) ? entities : [entities]
+      for (const entity of items) {
+        if (entity == null || typeof entity !== 'object') continue
+        const id = extractor.id(entity)
+        this.set(typeName, id, entity)
+        entityKeys.add(this.entityKey(typeName, id))
+      }
+    }
+    return entityKeys
   }
 
   denormalize(data: unknown, visited?: Set<string>): unknown {
@@ -181,6 +218,7 @@ export class EntityStore {
     for (const [type, typeMap] of snapshot) {
       this.entities.set(type, new Map(typeMap))
     }
+    this._version++
   }
 
   unregisterQuery(queryKey: string): void {
@@ -225,24 +263,32 @@ export class EntityStore {
     state.inFlightCount--
 
     if (state.inFlightCount > 0) {
+      // Update base to current store value when a mutation succeeds,
+      // so rollback from a later failure won't overwrite confirmed server data
+      if (success) {
+        state.baseValue = this.get(type, id)
+      }
       return null
     }
 
     // All in-flight mutations for this entity have settled
+    this.optimisticState.delete(key)
+
     if (state.hadError) {
-      // Restore to base value
-      if (state.baseValue === undefined) {
-        this.delete(type, id)
-      } else {
-        this.set(type, id, state.baseValue)
+      // Only roll back if the last mutation failed; if it succeeded,
+      // the store already contains confirmed server data
+      if (!success) {
+        if (state.baseValue === undefined) {
+          this.delete(type, id)
+        } else {
+          this.set(type, id, state.baseValue)
+        }
       }
-      this.optimisticState.delete(key)
       // Return affected query keys for invalidation
       return this.getQueriesForEntity(type, id)
     }
 
     // All succeeded, discard tracking
-    this.optimisticState.delete(key)
     return null
   }
 
@@ -250,10 +296,24 @@ export class EntityStore {
     this.optimisticState.clear()
   }
 
+  denormalizeCached(data: unknown): unknown {
+    if (data !== null && typeof data === 'object') {
+      const cached = this.denormWeakCache.get(data as object)
+      if (cached && cached.version === this._version) {
+        return cached.result
+      }
+      const result = this.denormalize(data)
+      this.denormWeakCache.set(data as object, { version: this._version, result })
+      return result
+    }
+    return this.denormalize(data)
+  }
+
   clear(): void {
     this.entities.clear()
     this.entityToQueries.clear()
     this.queryToEntities.clear()
     this.clearOptimistic()
+    this._version++
   }
 }

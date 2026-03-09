@@ -50,6 +50,7 @@ All options except `safe` are optional and provide sensible defaults.
 | `refetchInterval` | `number \| false` | `false` | Milliseconds between automatic refetches. Set to a number to enable polling. Only active when a query has at least one subscriber. |
 | `refetchIntervalInBackground` | `boolean` | `false` | When `true`, interval-based refetching continues even when the browser tab is hidden. By default, polling pauses when the tab loses visibility. |
 | `refetchOnWindowFocus` | `boolean` | `false` | When `true`, stale queries are automatically refetched when the browser window regains focus. Only applies to queries with at least one subscriber. |
+| `entities` | `GlobalEntityConfig` | `undefined` | Global entity configuration for normalized caching. Maps entity type names to `{ match, id }` extractors. See [Entity normalization](/docs/entity-normalization). |
 
 ---
 
@@ -92,10 +93,14 @@ const api = safeQuery<AppError>({
   staleTime: 5 * 60_000,
   gcTime: 30 * 60_000,
   enableOptimisticUpdates: true,
+  entities: {
+    user: { match: (obj) => 'email' in obj, id: (u: any) => String(u.id) },
+    post: { match: (obj) => 'title' in obj, id: (p: any) => String(p.id) },
+  },
 })
 ```
 
-Data stays fresh for 5 minutes. Unused cache entries live for 30 minutes before being garbage collected. Mutations with `optimistic` config update the UI immediately.
+Data stays fresh for 5 minutes. Unused cache entries live for 30 minutes before being garbage collected. Mutations with `optimistic` config update the UI immediately. The `entities` map tells the cache how to recognize and normalize `user` and `post` objects across all queries.
 
 ### Aggressive background sync
 
@@ -148,6 +153,77 @@ const createUser = api.mutate<User, { name: string }>({
   }),
 })
 ```
+
+### getQueryData(path, options?)
+
+Reads cached data for a query key. Returns `undefined` if no data is cached. If entities are configured and the cache contains normalized data, it is denormalized automatically.
+
+```ts
+// Simple key
+const users = api.getQueryData<User[]>('/users')
+
+// With path params
+const user = api.getQueryData<User>('/users/:id', { params: { id: '123' } })
+
+// With search params
+const page = api.getQueryData<User[]>('/users', { searchParams: { page: 1 } })
+```
+
+This is useful for checking cache state before deciding whether to fetch, prefetching on hover, or sharing data between unrelated queries.
+
+### setQueryData(path, updater, options?)
+
+Imperatively writes data to the cache for a query key. Accepts a static value or an updater function that receives the current cached data (or `undefined`). If entities are configured, the data is normalized into the entity store automatically. Subscribers are notified immediately.
+
+```ts
+// Set data directly
+api.setQueryData('/users', [{ id: '1', name: 'Alice' }])
+
+// Updater function
+api.setQueryData<User[]>('/users', (old) =>
+  old ? [...old, newUser] : [newUser]
+)
+
+// With path params
+api.setQueryData('/users/:id', updatedUser, { params: { id: '123' } })
+```
+
+Common use cases:
+
+```ts
+// WebSocket push update
+ws.on('user:updated', (user) => {
+  api.setQueryData('/users/:id', user, { params: { id: user.id } })
+})
+
+// Prefetch on hover
+function onHover(userId: string) {
+  if (!api.getQueryData('/users/:id', { params: { id: userId } })) {
+    fetchUser(userId).then((user) => {
+      api.setQueryData('/users/:id', user, { params: { id: userId } })
+    })
+  }
+}
+
+// Optimistic list update after creating an item
+const createUser = api.mutate<User, CreateUserInput>({
+  key: '/users',
+  method: 'POST',
+  fn: (ctx) => fetchJson<User>(buildUrl(BASE_URL, '/users'), {
+    method: 'POST',
+    body: ctx.body,
+  }),
+  onSuccess: (newUser) => {
+    api.setQueryData<User[]>('/users', (old) =>
+      old ? [...old, newUser] : [newUser]
+    )
+  },
+})
+```
+
+{% callout type="note" %}
+If the updater function returns `undefined`, the cache is not modified. This lets you conditionally skip updates.
+{% /callout %}
 
 ### invalidateByPrefix(prefix)
 
@@ -241,6 +317,10 @@ const getUsers = api.query({
   fn: () => fetchJson<User[]>(buildUrl(BASE_URL, '/users')),
 })
 ```
+
+{% callout type="note" %}
+The `entities` option is client-level only and cannot be overridden per-query. To control how a specific query extracts entities from its response, use the `normalize` option on the query instead. See [Entity normalization](/docs/entity-normalization) for details.
+{% /callout %}
 
 See the [Queries](/docs/queries) page for the full list of per-query options.
 

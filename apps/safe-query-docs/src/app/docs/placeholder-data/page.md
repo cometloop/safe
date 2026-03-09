@@ -24,7 +24,6 @@ const getUser = api.query({
     id: 0,
     name: 'Loading...',
     email: '',
-    __type: 'User',
   },
 })
 ```
@@ -48,7 +47,6 @@ const getUser = api.query({
     name: '—',
     email: '—',
     avatar: '/placeholder-avatar.png',
-    __type: 'User',
   },
 })
 ```
@@ -59,17 +57,18 @@ This works well for skeleton UIs where you want to show the page layout with pla
 
 ## Function form with DataFnContext
 
-For dynamic placeholder data, use a function. The function receives a `DataFnContext` with access to query parameters and the entity store:
+For dynamic placeholder data, use a function. The function receives a `DataFnContext` with access to query parameters, the entity store, and the previous query result:
 
 ```ts
 type DataFnContext = {
   getEntity: (type: string, id: string) => any | undefined
+  previousData?: TData  // last successfully fetched data from any invocation
   params?: Record<string, string>
   searchParams?: Record<string, string>
 }
 ```
 
-This is where placeholder data becomes powerful — you can pull data from the entity store to show a preview while the full data loads.
+This is where placeholder data becomes powerful — you can pull data from the entity store to show a preview while the full data loads, or use `previousData` to hold the last result during parameter transitions.
 
 ```ts
 const getUser = api.query({
@@ -143,7 +142,6 @@ type UserSummary = {
   id: number
   name: string
   avatar: string
-  __type: 'User'
 }
 
 type UserDetail = {
@@ -153,7 +151,6 @@ type UserDetail = {
   bio: string
   email: string
   joinedAt: string
-  __type: 'User'
 }
 
 // List query returns summaries
@@ -212,6 +209,75 @@ getDashboard.subscribe((state) => {
 
 ---
 
+## keepPreviousData for pagination
+
+The most common pagination problem: when changing search params (e.g., page 1 to page 2), the new cache key has no data. The old data vanishes and the status drops to `loading`, causing a jarring flash.
+
+`keepPreviousData` solves this by holding the previous query result as placeholder data during transitions. Import it from `@cometloop/safe-query` and pass it as `placeholderData`:
+
+```ts
+import { keepPreviousData } from '@cometloop/safe-query'
+
+const getUsers = api.query({
+  key: '/users',
+  fn: (ctx) =>
+    fetchJson<User[]>(
+      buildUrl(BASE_URL, '/users', undefined, ctx.searchParams),
+    ),
+  placeholderData: keepPreviousData,
+})
+```
+
+Now when the user navigates from page 1 to page 2, the page 1 data stays visible while page 2 loads:
+
+```ts
+// Fetch page 1
+await getUsers({ searchParams: { page: 1 } })
+
+// Navigate to page 2 — page 1 data is shown as placeholder
+getUsers.subscribe(
+  (state) => {
+    console.log(state.data)             // Page 1 data → Page 2 data
+    console.log(state.isPlaceholderData) // true → false
+    console.log(state.isFetching)       // true → false
+  },
+  { searchParams: { page: 2 } },
+)
+
+await getUsers({ searchParams: { page: 2 } })
+```
+
+### How it works
+
+`keepPreviousData` is a simple function: `(ctx) => ctx.previousData`. The `previousData` property on the context is the last successfully fetched data from **any** invocation of that query, regardless of params or search params. This means data from page 1 is available as placeholder when page 2 is loading.
+
+You can also write custom logic using `previousData` directly:
+
+```ts
+const getUsers = api.query({
+  key: '/users',
+  fn: (ctx) =>
+    fetchJson<PaginatedResponse>(
+      buildUrl(BASE_URL, '/users', undefined, ctx.searchParams),
+    ),
+  placeholderData: (ctx) => {
+    if (!ctx.previousData) return undefined
+
+    // Show previous items but update the page metadata
+    return {
+      ...ctx.previousData,
+      page: Number(ctx.searchParams?.page ?? 1),
+    }
+  },
+})
+```
+
+{% callout type="note" %}
+`previousData` tracks the last successful result across all cache keys for that query definition. It is not per-subscriber or per-cache-key — if you fetch page 1 and then page 3, the page 3 placeholder will be page 1's data.
+{% /callout %}
+
+---
+
 ## Placeholder data vs initial data
 
 These two features serve different purposes. Choosing the wrong one leads to subtle bugs.
@@ -223,7 +289,7 @@ These two features serve different purposes. Choosing the wrong one leads to sub
 | **Visible to other subscribers** | No (per-subscription) | Yes (all subscribers see it) |
 | **Replaced when real data arrives** | Yes | Only if refetch occurs |
 | **`isPlaceholderData` flag** | `true` | `false` |
-| **Use case** | Transient preview while fetching | Pre-populated cache (SSR, seeding) |
+| **Use case** | Transient preview while fetching, pagination | Pre-populated cache (SSR, seeding) |
 
 **Use `placeholderData` when:**
 - You want to show *something* while data loads

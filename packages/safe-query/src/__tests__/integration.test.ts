@@ -26,16 +26,19 @@ describe('Integration', () => {
 
   it('full query flow with entity normalization', async () => {
     const users = [
-      { id: '1', name: 'Alice', __type: 'user' },
-      { id: '2', name: 'Bob', __type: 'user' },
+      { id: '1', name: 'Alice' },
+      { id: '2', name: 'Bob' },
     ]
 
-    const api = createApi()
+    const api = createApi({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
 
     const usersQuery = api.query({
       key: '/users',
       fn: () => Promise.resolve(users),
-      entities: { user: (u: any) => u.id },
     })
 
     const [result, err] = await usersQuery()
@@ -52,7 +55,12 @@ describe('Integration', () => {
       },
     ]
 
-    const api = createApi()
+    const api = createApi({
+      entities: {
+        post: { match: (obj: any) => 'title' in obj, id: (p: any) => p.id },
+        user: { match: (obj: any) => 'userId' in obj, id: (u: any) => u.userId },
+      },
+    })
 
     const postsQuery = api.query({
       key: '/posts',
@@ -60,35 +68,31 @@ describe('Integration', () => {
       parseResponse: (data: any[]) =>
         data.map((post) => ({
           ...post,
-          __type: 'post' as const,
           author: {
             ...post.author,
-            __type: 'user' as const,
           },
         })),
-      entities: {
-        post: (p: any) => p.id,
-        user: (u: any) => u.userId,
-      },
     })
 
     const [result, err] = await postsQuery()
     expect(err).toBeNull()
     expect(result).toBeDefined()
     expect(result![0].title).toBe('Hello')
-    expect(result![0].__type).toBe('post')
-    expect(result![0].author.__type).toBe('user')
+    expect(result![0].author.name).toBe('Alice')
   })
 
   it('mutation updates entity store and notifies queries', async () => {
-    const users = [{ id: '1', name: 'Alice', __type: 'user' }]
+    const users = [{ id: '1', name: 'Alice' }]
 
-    const api = createApi()
+    const api = createApi({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
 
     const usersQuery = api.query({
       key: '/users',
       fn: () => Promise.resolve(users),
-      entities: { user: (u: any) => u.id },
     })
 
     // Execute query to populate cache
@@ -99,10 +103,8 @@ describe('Integration', () => {
       fn: () => Promise.resolve({
         id: '1',
         name: 'Alice Updated',
-        __type: 'user',
       }),
       method: 'PUT',
-      entities: { user: (u: any) => u.id },
     })
 
     // Execute mutation
@@ -114,7 +116,6 @@ describe('Integration', () => {
     expect(result).toEqual({
       id: '1',
       name: 'Alice Updated',
-      __type: 'user',
     })
   })
 
@@ -157,14 +158,18 @@ describe('Integration', () => {
   })
 
   it('optimistic update flow with rollback', async () => {
-    const users = [{ id: '1', name: 'Alice', __type: 'user' }]
+    const users = [{ id: '1', name: 'Alice' }]
 
-    const api = createApi({ enableOptimisticUpdates: true })
+    const api = createApi({
+      enableOptimisticUpdates: true,
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
 
     const usersQuery = api.query({
       key: '/users',
       fn: () => Promise.resolve(users),
-      entities: { user: (u: any) => u.id },
     })
 
     // Populate cache
@@ -180,7 +185,6 @@ describe('Integration', () => {
       key: '/users/:id',
       fn: () => Promise.reject(new Error('Server error')),
       method: 'PUT',
-      entities: { user: (u: any) => u.id },
     })
 
     // Execute mutation that will fail
@@ -295,33 +299,35 @@ describe('Integration', () => {
 
   it('mapToEntities populates entity store and mutation updates flow back to query', async () => {
     type ApiUser = { type: string; id: string; name: string }
-    type NormalizedUser = ApiUser & { __type: 'user' }
+    type EnrichedUser = ApiUser & { displayName: string }
 
-    const api = createApi()
+    const api = createApi({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
 
     const usersQuery = api.query({
       key: '/users',
       fn: (): Promise<ApiUser[]> =>
         Promise.resolve([{ type: 'user', id: '1', name: 'Alice' }]),
-      mapToEntities: (users): NormalizedUser[] =>
-        users.map(u => ({ ...u, __type: 'user' as const })),
-      entities: { user: (u: NormalizedUser) => u.id },
+      mapToEntities: (users): EnrichedUser[] =>
+        users.map(u => ({ ...u, displayName: u.name.toUpperCase() })),
     })
 
     // Populate cache and entity store via query
     const [queryResult, queryErr] = await usersQuery()
     expect(queryErr).toBeNull()
     const first = queryResult![0]!
-    expect(first.__type).toBe('user')
+    expect(first.displayName).toBe('ALICE')
     expect(first.name).toBe('Alice')
 
     // Mutate the entity
     const updateUser = api.mutate({
       key: '/users/:id',
       fn: () =>
-        Promise.resolve({ type: 'user', id: '1', name: 'Alice Updated', __type: 'user' }),
+        Promise.resolve({ type: 'user', id: '1', name: 'Alice Updated' }),
       method: 'PUT',
-      entities: { user: (u: any) => u.id },
     })
 
     await updateUser({ params: { id: '1' }, body: { name: 'Alice Updated' } })
@@ -354,22 +360,25 @@ describe('Integration', () => {
 
   it('list-to-detail with initialData — use getEntity in detail query for instant return', async () => {
     const users = [
-      { id: '1', name: 'Alice', __type: 'user' as const },
-      { id: '2', name: 'Bob', __type: 'user' as const },
+      { id: '1', name: 'Alice' },
+      { id: '2', name: 'Bob' },
     ]
 
-    const api = createApi()
+    const api = createApi({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
 
     const usersQuery = api.query({
       key: '/users',
       fn: () => Promise.resolve(users),
-      entities: { user: (u: any) => u.id },
     })
 
     // Populate the list query cache + entity store
     await usersQuery()
 
-    const detailFn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice', __type: 'user' })
+    const detailFn = vi.fn().mockResolvedValue({ id: '1', name: 'Alice' })
     const userQuery = api.query({
       key: '/users/:id',
       fn: detailFn,
@@ -387,15 +396,18 @@ describe('Integration', () => {
 
   it('list-to-detail with placeholderData — entity shown as placeholder while fetching', async () => {
     const users = [
-      { id: '1', name: 'Alice', __type: 'user' as const },
+      { id: '1', name: 'Alice' },
     ]
 
-    const api = createApi()
+    const api = createApi({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
 
     const usersQuery = api.query({
       key: '/users',
       fn: () => Promise.resolve(users),
-      entities: { user: (u: any) => u.id },
     })
 
     // Populate entity store
@@ -425,7 +437,7 @@ describe('Integration', () => {
     expect(placeholderState.isFetching).toBe(true)
     expect(placeholderState.status).toBe('success')
 
-    resolveDetail!({ id: '1', name: 'Alice (full)', __type: 'user' })
+    resolveDetail!({ id: '1', name: 'Alice (full)' })
 
     // Wait for settle
     await new Promise(resolve => setTimeout(resolve, 10))

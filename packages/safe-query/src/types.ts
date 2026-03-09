@@ -19,57 +19,17 @@ export type HasPathParams<T extends string> = [ExtractPathParams<T>] extends
   ? false
   : true
 
-// ─── Entity Type Inference ───
+// ─── Entity Types ───
 
-export type ExtractEntityTypeNames<T, D extends number[] = []> =
-  D['length'] extends 5
-    ? never
-    : NonNullable<T> extends { __type: infer Type extends string }
-      ?
-          | Type
-          | {
-              [K in keyof NonNullable<T>]: ExtractEntityTypeNames<
-                NonNullable<T>[K],
-                [...D, 0]
-              >
-            }[keyof NonNullable<T>]
-      : NonNullable<T> extends Array<infer Item>
-        ? ExtractEntityTypeNames<Item, [...D, 0]>
-        : NonNullable<T> extends object
-          ? {
-              [K in keyof NonNullable<T>]: ExtractEntityTypeNames<
-                NonNullable<T>[K],
-                [...D, 0]
-              >
-            }[keyof NonNullable<T>]
-          : never
-
-export type ExtractEntityByType<
-  T,
-  TypeName extends string,
-  D extends number[] = [],
-> =
-  D['length'] extends 5
-    ? never
-    : NonNullable<T> extends { __type: TypeName }
-      ? NonNullable<T>
-      : NonNullable<T> extends Array<infer Item>
-        ? ExtractEntityByType<Item, TypeName, [...D, 0]>
-        : NonNullable<T> extends object
-          ? {
-              [K in keyof NonNullable<T>]: ExtractEntityByType<
-                NonNullable<T>[K],
-                TypeName,
-                [...D, 0]
-              >
-            }[keyof NonNullable<T>]
-          : never
-
-export type EntityExtractors<TParsed> = {
-  [K in ExtractEntityTypeNames<TParsed>]: (
-    entity: ExtractEntityByType<TParsed, K>
-  ) => string
+export type MatchedEntityExtractor<T = any> = {
+  match: (obj: Record<string, unknown>) => boolean
+  id: (entity: T) => string
 }
+
+export type GlobalEntityConfig = Record<string, MatchedEntityExtractor>
+
+export type NormalizeFn<TData, TEntities extends GlobalEntityConfig = GlobalEntityConfig> =
+  (data: TData) => { [K in keyof TEntities]?: unknown[] }
 
 // ─── Entity Reference ───
 
@@ -85,6 +45,18 @@ export type QueryState<TData, TError> = {
   isStale: boolean
   dataUpdatedAt: number | null
   isPlaceholderData: boolean
+}
+
+// ─── Mutation State ───
+
+export type MutationState<TData, TError> = {
+  status: 'idle' | 'pending' | 'success' | 'error'
+  isPending: boolean
+  isSuccess: boolean
+  isError: boolean
+  data: TData | undefined
+  error: TError | null
+  submittedAt: number | null
 }
 
 // ─── Cache Entry ───
@@ -142,8 +114,9 @@ export type FetchOptions = {
 
 // ─── Client Config ───
 
-export type SafeQueryConfig<E> = {
+export type SafeQueryConfig<E, TEntities extends GlobalEntityConfig = GlobalEntityConfig> = {
   safe: SafeInstance<E, any>
+  entities?: TEntities
   staleTime?: number
   gcTime?: number
   enableOptimisticUpdates?: boolean
@@ -159,8 +132,9 @@ export type QueryFnContext<TPath extends string> = {
   signal?: AbortSignal
 } & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : unknown)
 
-export type DataFnContext<TPath extends string> = {
+export type DataFnContext<TPath extends string, TData = unknown> = {
   getEntity: (type: string, id: string) => unknown | undefined
+  previousData?: TData
 } & ([HasPathParams<TPath>] extends [true]
   ? { params: PathParams<TPath>; searchParams?: SearchParams }
   : { searchParams?: SearchParams })
@@ -181,20 +155,20 @@ export type LifecycleCallbacks<TData, TError = unknown> = {
 
 // ─── Query Config ───
 
-export type QueryConfig<TData, TPath extends string = string, TParsed = TData, TMapped = TParsed> = {
+export type QueryConfig<TData, TPath extends string = string, TParsed = TData, TMapped = TParsed, TEntities extends GlobalEntityConfig = GlobalEntityConfig> = {
   key: TPath
   fn: (context: QueryFnContext<TPath>) => Promise<TData>
   parseResponse?: (data: TData) => TParsed
-  entities?: EntityExtractors<TMapped>
+  normalize?: NormalizeFn<TMapped, TEntities>
   staleTime?: number
   gcTime?: number
   retry?: RetryConfig
   refetchInterval?: number | false
   refetchIntervalInBackground?: boolean
   refetchOnWindowFocus?: boolean
-  initialData?: TMapped | ((context: DataFnContext<TPath>) => TMapped | undefined)
+  initialData?: TMapped | ((context: DataFnContext<TPath, TMapped>) => TMapped | undefined)
   initialDataUpdatedAt?: number | (() => number | undefined)
-  placeholderData?: TMapped | ((context: DataFnContext<TPath>) => TMapped | undefined)
+  placeholderData?: TMapped | ((context: DataFnContext<TPath, TMapped>) => TMapped | undefined)
 } & LifecycleCallbacks<TMapped>
   & ([TMapped] extends [TParsed]
     ? [TParsed] extends [TMapped]
@@ -211,6 +185,11 @@ export type OptimisticConfig<TPath extends string> = {
   ) => string
 }
 
+export type MutationVariables<TPath extends string, TBody> = {
+  searchParams?: SearchParams
+} & ([HasPathParams<TPath>] extends [true] ? { params: PathParams<TPath> } : unknown)
+  & ([TBody] extends [void | undefined] ? unknown : { body: TBody })
+
 export type MutationConfig<
   TData,
   TBody = void,
@@ -222,16 +201,20 @@ export type MutationConfig<
     | 'DELETE',
   TParsed = TData,
   TMapped = TParsed,
+  TEntities extends GlobalEntityConfig = GlobalEntityConfig,
 > = {
   key: TPath
   fn: (context: MutationFnContext<TPath, TBody>) => Promise<TData>
   method?: TMethod
   parseResponse?: (data: TData) => TParsed
-  entities?: EntityExtractors<TMapped>
+  normalize?: NormalizeFn<TMapped, TEntities>
   optimistic?: OptimisticConfig<TPath>
   retry?: RetryConfig
-} & LifecycleCallbacks<TMapped>
-  & ([TMapped] extends [TParsed]
+  onMutate?: (variables: MutationVariables<TPath, TBody>) => unknown | Promise<unknown>
+  onSuccess?: (data: TMapped, context?: unknown) => void
+  onError?: (error: unknown, context?: unknown) => void
+  onSettled?: (data: TMapped | undefined, error: unknown | null, context?: unknown) => void
+} & ([TMapped] extends [TParsed]
     ? [TParsed] extends [TMapped]
       ? { mapToEntities?: (data: TParsed) => TMapped }
       : { mapToEntities: (data: TParsed) => TMapped }
@@ -273,6 +256,15 @@ export type QueryCallable<TData, TError, TPath extends string> = {
 
 export type MutationCallable<TData, TError, TPath extends string, TBody> = {
   (options: MutationInvokeOptions<TPath, TBody> & LifecycleCallbacks<TData, TError>): Promise<SafeResult<TData, TError>>
+  subscribe: (callback: (state: MutationState<TData, TError>) => void) => () => void
+  readonly status: MutationState<TData, TError>['status']
+  readonly isPending: boolean
+  readonly isSuccess: boolean
+  readonly isError: boolean
+  readonly data: TData | undefined
+  readonly error: TError | null
+  readonly submittedAt: number | null
+  reset: () => void
 }
 
 // ─── Subscriber callback ───

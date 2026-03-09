@@ -36,8 +36,8 @@ const createUser = api.mutate<User, { name: string; email: string }>({
 | `fn` | `(context: MutationFnContext) => Promise<TData>` | **(required)** | The function that performs the mutation. Receives a context object with `params`, `body`, `searchParams`, and `signal`. |
 | `method` | `'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'` | — | The HTTP method for this mutation. Affects how optimistic updates behave. |
 | `parseResponse` | `(data: TData) => TParsed` | — | Transform the raw response before processing. |
-| `mapToEntities` | `(data: TParsed) => TMapped` | — | Add `__type` fields for entity normalization. Required when `TMapped` differs from `TParsed`. |
-| `entities` | `{ [typeName]: (entity) => string }` | — | Entity extractors for normalization. Maps type names to functions that return entity IDs. |
+| `mapToEntities` | `(data: TParsed) => TMapped` | — | Transform data before normalization. Useful for reshaping API responses before entity extraction. |
+| `normalize` | `(data: TMapped) => Record<string, unknown \| unknown[]>` | — | Explicit entity extraction. When provided, skips tree walk. |
 | `optimistic` | `{ entityType: string, entityId: (params) => string }` | — | Configure optimistic updates. See [Optimistic updates](/docs/optimistic-updates). |
 | `retry` | `RetryConfig` | — | Retry configuration from `@cometloop/safe`. Controls automatic retries on failure. |
 | `onSuccess` | `(data: TMapped) => void` | — | Called when the mutation succeeds. |
@@ -178,9 +178,10 @@ const [, error] = await deleteUser({
 
 ## Mutations and the entity cache
 
-When a mutation response includes entities (via `mapToEntities` and `entities`), the entity cache is automatically updated. Any queries that reference the updated entities are notified and their subscribers receive the new data.
+When entities are configured globally on the client, mutation responses are automatically normalized into the entity cache. Any queries that reference the updated entities are notified and their subscribers receive the new data.
 
 ```ts
+// Entities configured globally on the client — mutations just work
 const updateUser = api.mutate<User, Partial<User>>({
   key: '/users/:id',
   method: 'PATCH',
@@ -189,10 +190,6 @@ const updateUser = api.mutate<User, Partial<User>>({
       method: 'PATCH',
       body: ctx.body,
     }),
-  mapToEntities: (user) => ({ ...user, __type: 'User' }),
-  entities: {
-    User: (user) => user.id,
-  },
 })
 
 // After this mutation succeeds, any query that includes User:123
@@ -316,6 +313,9 @@ Optimistic updates require:
 const api = safeQuery<AppError>({
   safe,
   enableOptimisticUpdates: true,
+  entities: {
+    user: { match: (obj) => 'email' in obj, id: (u) => u.id },
+  },
 })
 
 const updateUser = api.mutate<User, Partial<User>>({
@@ -326,18 +326,14 @@ const updateUser = api.mutate<User, Partial<User>>({
       method: 'PATCH',
       body: ctx.body,
     }),
-  mapToEntities: (user) => ({ ...user, __type: 'User' }),
-  entities: {
-    User: (user) => user.id,
-  },
   optimistic: {
-    entityType: 'User',
+    entityType: 'user',
     entityId: (params) => params.id,
   },
 })
 ```
 
-For a single entity type, the `optimistic` config is automatically inferred from the `entities` config, so you can simplify:
+For a single entity type, the `optimistic` config is automatically inferred from the global `entities` config and the last `:param` in the mutation key, so you can simplify:
 
 ```ts
 const updateUser = api.mutate<User, Partial<User>>({
@@ -348,11 +344,7 @@ const updateUser = api.mutate<User, Partial<User>>({
       method: 'PATCH',
       body: ctx.body,
     }),
-  mapToEntities: (user) => ({ ...user, __type: 'User' }),
-  entities: {
-    User: (user) => user.id,
-  },
-  // optimistic config auto-inferred for single entity type
+  // optimistic config auto-inferred from global entities + path params
 })
 ```
 
@@ -416,10 +408,6 @@ const updateTodo = api.mutate<Todo, Partial<Todo>>({
       method: 'PATCH',
       body: ctx.body,
     }),
-  mapToEntities: (todo) => ({ ...todo, __type: 'Todo' }),
-  entities: {
-    Todo: (todo) => todo.id,
-  },
 })
 
 // Delete with optimistic UI
@@ -430,10 +418,6 @@ const deleteTodo = api.mutate<void, never>({
     fetchJson<void>(buildUrl(BASE_URL, '/todos/:id', ctx.params), {
       method: 'DELETE',
     }),
-  mapToEntities: () => ({ __type: 'Todo' }),
-  entities: {
-    Todo: () => '',
-  },
   onSuccess: () => {
     api.invalidateByPrefix('/todos')
   },

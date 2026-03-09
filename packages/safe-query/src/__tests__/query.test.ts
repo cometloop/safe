@@ -5,6 +5,7 @@ import { QueryCache } from '../query-cache'
 import { EntityStore } from '../entity-store'
 import { Notifier } from '../notifier'
 import { FocusManager } from '../focus-manager'
+import { keepPreviousData } from '../index'
 
 function createDeps(overrides: Record<string, any> = {}) {
   const safeInstance = createSafe({
@@ -86,15 +87,18 @@ describe('createQuery', () => {
 
   it('normalizes entities', async () => {
     const users = [
-      { id: '1', name: 'Alice', __type: 'user' },
-      { id: '2', name: 'Bob', __type: 'user' },
+      { id: '1', name: 'Alice' },
+      { id: '2', name: 'Bob' },
     ]
 
-    const deps = createDeps()
+    const deps = createDeps({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
     const query = createQuery({
       key: '/users',
       fn: () => Promise.resolve(users),
-      entities: { user: (u: any) => u.id },
     }, deps)
 
     await query()
@@ -103,12 +107,10 @@ describe('createQuery', () => {
     expect(deps.entityStore.get('user', '1')).toEqual({
       id: '1',
       name: 'Alice',
-      __type: 'user',
     })
     expect(deps.entityStore.get('user', '2')).toEqual({
       id: '2',
       name: 'Bob',
-      __type: 'user',
     })
   })
 
@@ -654,63 +656,69 @@ describe('createQuery', () => {
   })
 
   it('mapToEntities transforms data and entities are normalized', async () => {
-    type ApiUser = { type: string; id: string; name: string }
-    type NormalizedUser = ApiUser & { __type: 'user' }
+    type ApiUser = { id: string; name: string }
+    type EnrichedUser = ApiUser & { displayName: string }
 
     const apiUsers: ApiUser[] = [
-      { type: 'user', id: '1', name: 'Alice' },
-      { type: 'user', id: '2', name: 'Bob' },
+      { id: '1', name: 'Alice' },
+      { id: '2', name: 'Bob' },
     ]
 
-    const deps = createDeps()
+    const deps = createDeps({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
     const query = createQuery({
       key: '/users',
       fn: () => Promise.resolve(apiUsers),
-      mapToEntities: (users): NormalizedUser[] =>
-        users.map(u => ({ ...u, __type: 'user' as const })),
-      entities: { user: (u: any) => u.id },
+      mapToEntities: (users): EnrichedUser[] =>
+        users.map(u => ({ ...u, displayName: u.name.toUpperCase() })),
     }, deps)
 
     const [result, err] = await query()
     expect(err).toBeNull()
     expect(result).toEqual([
-      { type: 'user', id: '1', name: 'Alice', __type: 'user' },
-      { type: 'user', id: '2', name: 'Bob', __type: 'user' },
+      { id: '1', name: 'Alice', displayName: 'ALICE' },
+      { id: '2', name: 'Bob', displayName: 'BOB' },
     ])
 
     expect(deps.entityStore.get('user', '1')).toEqual(
-      expect.objectContaining({ id: '1', name: 'Alice', __type: 'user' })
+      expect.objectContaining({ id: '1', name: 'Alice', displayName: 'ALICE' })
     )
     expect(deps.entityStore.get('user', '2')).toEqual(
-      expect.objectContaining({ id: '2', name: 'Bob', __type: 'user' })
+      expect.objectContaining({ id: '2', name: 'Bob', displayName: 'BOB' })
     )
   })
 
   it('mapToEntities composes with parseResponse', async () => {
-    type RawResponse = { data: { type: string; id: string; name: string }[] }
-    type ApiUser = { type: string; id: string; name: string }
-    type NormalizedUser = ApiUser & { __type: 'user' }
+    type RawResponse = { data: { id: string; name: string }[] }
+    type ApiUser = { id: string; name: string }
+    type EnrichedUser = ApiUser & { displayName: string }
 
-    const deps = createDeps()
+    const deps = createDeps({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
     const query = createQuery({
       key: '/users',
       fn: (): Promise<RawResponse> => Promise.resolve({
-        data: [{ type: 'user', id: '1', name: 'Alice' }],
+        data: [{ id: '1', name: 'Alice' }],
       }),
       parseResponse: (raw: RawResponse): ApiUser[] => raw.data,
-      mapToEntities: (users): NormalizedUser[] =>
-        users.map(u => ({ ...u, __type: 'user' as const })),
-      entities: { user: (u: any) => u.id },
+      mapToEntities: (users): EnrichedUser[] =>
+        users.map(u => ({ ...u, displayName: u.name.toUpperCase() })),
     }, deps)
 
     const [result, err] = await query()
     expect(err).toBeNull()
     expect(result).toEqual([
-      { type: 'user', id: '1', name: 'Alice', __type: 'user' },
+      { id: '1', name: 'Alice', displayName: 'ALICE' },
     ])
 
     expect(deps.entityStore.get('user', '1')).toEqual(
-      expect.objectContaining({ id: '1', name: 'Alice', __type: 'user' })
+      expect.objectContaining({ id: '1', name: 'Alice', displayName: 'ALICE' })
     )
   })
 
@@ -729,18 +737,21 @@ describe('createQuery', () => {
   })
 
   it('subscribers receive mapToEntities-transformed data', async () => {
-    type ApiUser = { type: string; id: string; name: string }
-    type NormalizedUser = ApiUser & { __type: 'user' }
+    type ApiUser = { id: string; name: string }
+    type EnrichedUser = ApiUser & { displayName: string }
 
-    const deps = createDeps()
+    const deps = createDeps({
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
     const query = createQuery({
       key: '/users',
       fn: (): Promise<ApiUser[]> => Promise.resolve([
-        { type: 'user', id: '1', name: 'Alice' },
+        { id: '1', name: 'Alice' },
       ]),
-      mapToEntities: (users): NormalizedUser[] =>
-        users.map(u => ({ ...u, __type: 'user' as const })),
-      entities: { user: (u: any) => u.id },
+      mapToEntities: (users): EnrichedUser[] =>
+        users.map(u => ({ ...u, displayName: u.name.toUpperCase() })),
     }, deps)
 
     const states: any[] = []
@@ -753,7 +764,7 @@ describe('createQuery', () => {
     const lastState = states[states.length - 1]
     expect(lastState.status).toBe('success')
     expect(lastState.data).toEqual([
-      { type: 'user', id: '1', name: 'Alice', __type: 'user' },
+      { id: '1', name: 'Alice', displayName: 'ALICE' },
     ])
 
     unsub()
@@ -867,27 +878,31 @@ describe('createQuery', () => {
 
   it('initialData works with entity normalization — entity store populated', async () => {
     const fn = vi.fn().mockResolvedValue([])
-    const deps = createDeps({ defaultStaleTime: 60000 })
+    const deps = createDeps({
+      defaultStaleTime: 60000,
+      entities: {
+        user: { match: (obj: any) => 'name' in obj, id: (u: any) => u.id },
+      },
+    })
     const query = createQuery({
       key: '/users',
       fn,
       staleTime: 60000,
       initialData: [
-        { id: '1', name: 'Alice', __type: 'user' },
-        { id: '2', name: 'Bob', __type: 'user' },
+        { id: '1', name: 'Alice' },
+        { id: '2', name: 'Bob' },
       ],
       initialDataUpdatedAt: Date.now(),
-      entities: { user: (u: any) => u.id },
     }, deps)
 
     await query()
 
     expect(fn).not.toHaveBeenCalled()
     expect(deps.entityStore.get('user', '1')).toEqual(
-      expect.objectContaining({ id: '1', name: 'Alice', __type: 'user' })
+      expect.objectContaining({ id: '1', name: 'Alice' })
     )
     expect(deps.entityStore.get('user', '2')).toEqual(
-      expect.objectContaining({ id: '2', name: 'Bob', __type: 'user' })
+      expect.objectContaining({ id: '2', name: 'Bob' })
     )
   })
 
@@ -1083,6 +1098,157 @@ describe('createQuery', () => {
     // With data in cache, placeholder should never appear
     expect(states[0].data).toEqual([{ id: '1', name: 'Real' }])
     expect(states[0].isPlaceholderData).toBe(false)
+
+    unsub()
+  })
+
+  // ─── keepPreviousData ───
+
+  it('keepPreviousData holds page 1 data while page 2 loads', async () => {
+    let resolvePromise: (value: any) => void
+    let callCount = 0
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => {
+        callCount++
+        if (callCount === 1) return Promise.resolve([{ id: '1', page: 1 }])
+        return new Promise((resolve) => { resolvePromise = resolve })
+      },
+      placeholderData: keepPreviousData,
+    }, deps)
+
+    // Fetch page 1
+    await query({ searchParams: { page: 1 } })
+
+    // Subscribe to page 2
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    }, { searchParams: { page: 2 } })
+
+    // Start fetch for page 2
+    const p2 = query({ searchParams: { page: 2 } })
+
+    // Should have previous data as placeholder
+    const placeholderState = states.find(s => s.isPlaceholderData)
+    expect(placeholderState).toBeDefined()
+    expect(placeholderState.data).toEqual([{ id: '1', page: 1 }])
+    expect(placeholderState.status).toBe('success')
+    expect(placeholderState.isFetching).toBe(true)
+
+    // Resolve page 2
+    resolvePromise!([{ id: '2', page: 2 }])
+    await p2
+
+    const lastState = states[states.length - 1]
+    expect(lastState.data).toEqual([{ id: '2', page: 2 }])
+    expect(lastState.isPlaceholderData).toBe(false)
+    expect(lastState.isFetching).toBe(false)
+
+    unsub()
+  })
+
+  it('keepPreviousData returns undefined when no prior data exists', async () => {
+    let resolvePromise: (value: any) => void
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users',
+      fn: () => new Promise((resolve) => { resolvePromise = resolve }),
+      placeholderData: keepPreviousData,
+    }, deps)
+
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    })
+
+    query()
+
+    // No prior data, so placeholder should not appear
+    const placeholderState = states.find(s => s.isPlaceholderData)
+    expect(placeholderState).toBeUndefined()
+
+    // Status should be loading, not success
+    const loadingState = states.find(s => s.isFetching)
+    expect(loadingState?.status).toBe('loading')
+
+    resolvePromise!([{ id: '1' }])
+    unsub()
+  })
+
+  it('placeholderData function receives previousData in context', async () => {
+    let resolvePromise: (value: any) => void
+    let callCount = 0
+
+    const deps = createDeps()
+    const placeholderFn = vi.fn().mockImplementation((ctx: any) => ctx.previousData)
+
+    const query = createQuery({
+      key: '/users',
+      fn: () => {
+        callCount++
+        if (callCount === 1) return Promise.resolve([{ id: '1' }])
+        return new Promise((resolve) => { resolvePromise = resolve })
+      },
+      placeholderData: placeholderFn,
+    }, deps)
+
+    // First fetch
+    await query({ searchParams: { page: 1 } })
+
+    // Subscribe to page 2 so getState/placeholderData gets called
+    const unsub = query.subscribe(() => {}, { searchParams: { page: 2 } })
+
+    // Start second fetch with different params
+    query({ searchParams: { page: 2 } })
+
+    expect(placeholderFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        previousData: [{ id: '1' }],
+        getEntity: expect.any(Function),
+      })
+    )
+
+    resolvePromise!([{ id: '2' }])
+    unsub()
+  })
+
+  it('keepPreviousData works with path params pagination', async () => {
+    let resolvePromise: (value: any) => void
+    let callCount = 0
+
+    const deps = createDeps()
+    const query = createQuery({
+      key: '/users/:userId/posts',
+      fn: () => {
+        callCount++
+        if (callCount === 1) return Promise.resolve([{ id: 'p1', title: 'Post 1' }])
+        return new Promise((resolve) => { resolvePromise = resolve })
+      },
+      placeholderData: keepPreviousData,
+    }, deps)
+
+    // Fetch page 1
+    await query({ params: { userId: '1' }, searchParams: { page: 1 } })
+
+    // Fetch page 2
+    const p2 = query({ params: { userId: '1' }, searchParams: { page: 2 } })
+
+    // Subscribe to page 2 and check state
+    const states: any[] = []
+    const unsub = query.subscribe((state) => {
+      states.push({ ...state })
+    }, { params: { userId: '1' }, searchParams: { page: 2 } })
+
+    const placeholderState = states.find(s => s.isPlaceholderData)
+    expect(placeholderState).toBeDefined()
+    expect(placeholderState.data).toEqual([{ id: 'p1', title: 'Post 1' }])
+
+    resolvePromise!([{ id: 'p2', title: 'Post 2' }])
+    await p2
 
     unsub()
   })

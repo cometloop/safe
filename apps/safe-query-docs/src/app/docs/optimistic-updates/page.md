@@ -28,7 +28,7 @@ Optimistic updates only work for `PUT`, `PATCH`, and `DELETE` mutations. `POST` 
 For a mutation to participate in optimistic updates, it must meet two conditions:
 
 1. **`enableOptimisticUpdates: true`** is set on the client config.
-2. **`entities`** is configured on the mutation so safe-query knows which entity type is being modified.
+2. **`entities`** is configured on the client so safe-query knows which entity types exist and how to identify them.
 
 If both conditions are met, safe-query will attempt to resolve the target entity either through auto-inference or an explicit `optimistic` config.
 
@@ -36,17 +36,24 @@ If both conditions are met, safe-query will attempt to resolve the target entity
 
 ## Auto-inference
 
-When a mutation has exactly one entity type in its `entities` config, safe-query can automatically determine the entity type and ID without any additional configuration.
+When the global `entities` config contains a matching entity type, safe-query can automatically determine the entity type and ID without any additional configuration on the mutation.
 
-The entity type is taken from the single key in `entities`. The entity ID is extracted from the last `:param` segment in the mutation's path.
+The entity type is resolved by running response data through each entity's `match` function. The entity ID is extracted from the last `:param` segment in the mutation's path.
 
 ```ts
 type Todo = {
-  __type: 'Todo'
   id: string
   title: string
   completed: boolean
 }
+
+const api = safeQuery<AppError>({
+  safe,
+  enableOptimisticUpdates: true,
+  entities: {
+    todo: { match: (obj) => 'completed' in obj, id: (t) => t.id },
+  },
+})
 
 const updateTodo = api.mutate<Todo, Partial<Todo>>({
   key: '/todos/:id',
@@ -55,28 +62,24 @@ const updateTodo = api.mutate<Todo, Partial<Todo>>({
     method: 'PATCH',
     body: ctx.body,
   }),
-  entities: {
-    Todo: (todo) => todo.id,
-  },
 })
 ```
 
 In this example:
-- `entityType` is auto-inferred as `'Todo'` (the only key in `entities`).
+- `entityType` is auto-inferred as `'todo'` from the global `entities` config via the `match` function.
 - `entityId` is auto-inferred from the last `:param` in the path, which is `:id`. When you call `updateTodo({ params: { id: '42' }, body: { completed: true } })`, the entity ID resolves to `'42'`.
 
 ---
 
 ## Explicit OptimisticConfig
 
-When a mutation has multiple entity types or you need custom ID resolution, provide an explicit `optimistic` config:
+When auto-inference is not sufficient or you need custom ID resolution, provide an explicit `optimistic` config:
 
 ```ts
 type Comment = {
-  __type: 'Comment'
   id: string
   body: string
-  author: { __type: 'User'; id: string; name: string }
+  author: { id: string; name: string }
 }
 
 const updateComment = api.mutate<Comment, { body: string }>({
@@ -86,12 +89,8 @@ const updateComment = api.mutate<Comment, { body: string }>({
     buildUrl(BASE_URL, '/posts/:postId/comments/:commentId', ctx.params),
     { method: 'PATCH', body: ctx.body },
   ),
-  entities: {
-    Comment: (c) => c.id,
-    User: (u) => u.id,
-  },
   optimistic: {
-    entityType: 'Comment',
+    entityType: 'comment',
     entityId: (params) => params.commentId,
   },
 })
@@ -101,7 +100,7 @@ The `optimistic` config has two fields:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `entityType` | `string` | The entity type name to target for optimistic updates. Must match a key in `entities`. |
+| `entityType` | `string` | The entity type name to target for optimistic updates. Must match a key in the global `entities` config. |
 | `entityId` | `(params) => string` | A function that extracts the entity ID from the mutation's path params. |
 
 ---
@@ -145,9 +144,6 @@ const deleteTodo = api.mutate<void>({
   fn: (ctx) => fetchJson<void>(buildUrl(BASE_URL, '/todos/:id', ctx.params), {
     method: 'DELETE',
   }),
-  entities: {
-    Todo: (todo) => todo.id,
-  },
 })
 
 // Item disappears from the list immediately
@@ -198,7 +194,6 @@ A common pattern is an inline text editor where the user edits a field and saves
 
 ```ts
 type Article = {
-  __type: 'Article'
   id: string
   title: string
   body: string
@@ -208,9 +203,6 @@ type Article = {
 const getArticle = api.query({
   key: '/articles/:id',
   fn: (ctx) => fetchJson<Article>(buildUrl(BASE_URL, '/articles/:id', ctx.params)),
-  entities: {
-    Article: (a) => a.id,
-  },
 })
 
 const updateArticle = api.mutate<Article, Partial<Article>>({
@@ -220,9 +212,6 @@ const updateArticle = api.mutate<Article, Partial<Article>>({
     method: 'PATCH',
     body: ctx.body,
   }),
-  entities: {
-    Article: (a) => a.id,
-  },
 })
 
 // Subscribe to the article -- UI renders immediately on optimistic update
@@ -250,7 +239,6 @@ A list with delete buttons where items disappear immediately on click.
 
 ```ts
 type Task = {
-  __type: 'Task'
   id: string
   title: string
   assignee: string
@@ -259,9 +247,6 @@ type Task = {
 const getTasks = api.query({
   key: '/tasks',
   fn: () => fetchJson<Task[]>(buildUrl(BASE_URL, '/tasks')),
-  entities: {
-    Task: (t) => t.id,
-  },
 })
 
 const deleteTask = api.mutate<void>({
@@ -270,9 +255,6 @@ const deleteTask = api.mutate<void>({
   fn: (ctx) => fetchJson<void>(buildUrl(BASE_URL, '/tasks/:id', ctx.params), {
     method: 'DELETE',
   }),
-  entities: {
-    Task: (t) => t.id,
-  },
 })
 
 // Subscribe to the task list
@@ -294,7 +276,7 @@ async function handleDelete(taskId: string) {
 }
 ```
 
-Because `getTasks` has `entities` configured for `Task`, the entity store knows which queries reference each task. When `deleteTask` removes a task from the store, the `getTasks` subscriber fires with a list that no longer includes the deleted task.
+Because `entities` is configured globally on the client, the entity store knows which queries reference each task. When `deleteTask` removes a task from the store, the `getTasks` subscriber fires with a list that no longer includes the deleted task.
 
 ### Todo toggle
 
@@ -302,7 +284,6 @@ A todo list where checkboxes toggle completion status. This demonstrates rapid s
 
 ```ts
 type Todo = {
-  __type: 'Todo'
   id: string
   title: string
   completed: boolean
@@ -311,9 +292,6 @@ type Todo = {
 const getTodos = api.query({
   key: '/todos',
   fn: () => fetchJson<Todo[]>(buildUrl(BASE_URL, '/todos')),
-  entities: {
-    Todo: (t) => t.id,
-  },
 })
 
 const toggleTodo = api.mutate<Todo, { completed: boolean }>({
@@ -323,9 +301,6 @@ const toggleTodo = api.mutate<Todo, { completed: boolean }>({
     method: 'PATCH',
     body: ctx.body,
   }),
-  entities: {
-    Todo: (t) => t.id,
-  },
 })
 
 // Subscribe to the list

@@ -1,14 +1,22 @@
 export { safeQuery } from './client'
 export type { SafeQueryClient } from './client'
+
+export function keepPreviousData<TData = unknown>(
+  context: { previousData?: TData },
+): TData | undefined {
+  return context.previousData
+}
 export type {
   ExtractPathParams,
   PathParams,
   HasPathParams,
-  ExtractEntityTypeNames,
-  ExtractEntityByType,
-  EntityExtractors,
+  MatchedEntityExtractor,
+  GlobalEntityConfig,
+  NormalizeFn,
   EntityRef,
   QueryState,
+  MutationState,
+  MutationVariables,
   CacheEntry,
   FetchOptions,
   SafeQueryConfig,
@@ -30,8 +38,6 @@ export type {
 } from './types'
 export { HttpError, QueryDisabledError } from './types'
 export { QueryCache } from './query-cache'
-export { EntityStore } from './entity-store'
-export { Notifier } from './notifier'
 export { FocusManager } from './focus-manager'
 export { buildUrl } from './url'
 export { fetchJson } from './fetch-client'
